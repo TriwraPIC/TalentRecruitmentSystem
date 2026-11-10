@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles') ?>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">115 二所人力招募</div>
+    <div class="top-actions"><span id="meName" class="me"></span></div>
+  </header>
+
+  <main>
+    <div id="home" class="home-card"><p class="loading">讀取中…</p></div>
+  </main>
+
+  <div id="modal" class="modal" hidden><div id="modalCard" class="modal-card"></div></div>
+  <div id="toast" aria-live="polite"></div>
+
+  <?!= include('Common') ?>
+
+  <script>
+  bootApp(async () => {
+    const role = App.me.role, base = App.appUrl;
+    $('#meName').textContent = App.me.name + '（' + role + '）';
+    const links = [];
+    if (role === 'HR' || role === '管理員') links.push(['hr', 'HR 工作台', '新增應徵者、安排面試、追蹤錄取與到職']);
+    if (role !== 'HR') links.push(['manager', '主管工作台', '初選、標記已面試、給面試結果、填寫評語']);
+    $('#home').innerHTML = '<h2>' + esc(App.me.name) + '，你好</h2>' +
+      '<p class="sub">請選擇要進入的頁面。可以把進入後的網址加入書籤，下次直接開啟。</p>' +
+      links.map(l => '<a class="home-link" href="' + esc(base + '?page=' + l[0]) + '"><b>' + l[1] + '</b><span class="sub">' + l[2] + '</span></a>').join('');
+  }, null);
+  </script>
+</body>
+</html>

@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles') ?>
+  <style>
+    .form .auto { border-color: #d9a400; background: #fffbea; }
+    .c-thanks { --c: #b4532a; }
+    .parse-box { margin-top: 8px; font-size: 13.5px; color: var(--muted); }
+    .batch { max-height: 52vh; overflow: auto; margin-top: 10px; }
+    .batch td { vertical-align: top; } .batch input[data-k] { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 13.5px; }
+    .batch .fn { max-width: 12em; word-break: break-all; font-size: 12.5px; color: var(--muted); }
+    .batch tr.done { opacity: .6; } .batch tr.error td:last-child { color: #b3261e; }
+    /* 有 display 設定的元素，hidden 屬性會被蓋掉，要明確寫出來 */
+    .bp-overlay[hidden], .bp-ask[hidden], .bp-pill[hidden], .batch [hidden], .row-btns [hidden] { display: none !important; }
+    .loc-ro { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; }
+    .warn-t { color: var(--warn); }
+    .bp-overlay { position: fixed; inset: 0; z-index: 70; background: rgba(15, 25, 35, .45); display: flex; justify-content: center; align-items: flex-start; overflow: auto; padding: 24px 12px; }
+    .bp-card { position: relative; background: #fff; border-radius: var(--r-md); width: 100%; max-width: 1040px; padding: 18px 22px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+    .bp-head { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; }
+    .bp-head h2 { margin: 0; font-size: 18px; } .bp-head #bMin { margin-left: auto; }
+    .bp-pill { position: fixed; right: 20px; bottom: 20px; z-index: 71; background: var(--ink); color: #fff; border: 0; border-radius: 999px; padding: 10px 18px; font-size: 14px; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+    .bp-ask { position: absolute; inset: 0; background: rgba(255,255,255,.85); display: flex; align-items: center; justify-content: center; border-radius: var(--r-md); }
+    .bp-ask-card { background: #fff; border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px 20px; max-width: 440px; box-shadow: 0 8px 28px rgba(0,0,0,.18); }
+    .bp-ask-card p { margin: 0 0 10px; }
+    .b-all { margin: 10px 0 0; border: 1px solid var(--line); border-radius: var(--r-md); padding: 6px 10px; }
+    .b-all summary { cursor: pointer; font-weight: 700; color: var(--ink); }
+    .batch .pick-row td { background: #f7f9fb; }
+    .batch .dupw { display: block; color: var(--warn); font-size: 12px; }
+    .parse-box.ok { color: var(--warn); background: var(--warn-bg); padding: 8px 12px; border-radius: var(--r-sm); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">115 二所人力招募<small>HR 工作台</small></div>
+    <div class="top-actions">
+      <span id="sync" class="sync"></span>
+      <button id="btnRefresh" class="btn ghost">重新整理</button>
+      <button id="btnFeedback" class="btn ghost">主管回饋<span id="fbBadge" class="badge" hidden></span></button>
+      <a id="switchLink" class="btn ghost" hidden>切換到主管頁</a>
+      <button id="btnBatch" class="btn ghost">批量上傳履歷</button>
+      <button id="btnNew" class="btn primary">新增應徵者</button>
+      <span id="meName" class="me"></span>
+    </div>
+  </header>
+
+  <main>
+    <nav id="pipeline" class="pipeline" aria-label="招募階段"></nav>
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="搜尋姓名、學校、職缺、電話" aria-label="搜尋">
+      <span id="count" class="count"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="list">
+        <thead><tr><th>姓名</th><th>應徵職缺</th><th>學歷</th><th>性別／年齡</th><th>狀態</th><th>面試</th><th>最後更新</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="7" class="loading">讀取中…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+
+  <aside id="drawer" class="drawer" hidden aria-label="應徵者詳細資料">
+    <div class="drawer-head"><h2 id="drawerTitle"></h2><button class="x" onclick="closeDrawer()" aria-label="關閉">×</button></div>
+    <div id="drawerBody" class="drawer-body"></div>
+  </aside>
+
+  <div id="modal" class="modal" hidden><div id="modalCard" class="modal-card" role="dialog" aria-modal="true"></div></div>
+  <div id="toast" aria-live="polite"></div>
+
+  <?!= include('Common') ?>
+  <?!= include('Memo') ?>
+
+  <script>
+  /* ===== HR 頁面 ===== */
+  const HR_STAGES = ['screening', 'assign', 'to_schedule', 'scheduled', 'await_result', 'eval', 'offer', 'thanks', 'closed'];
+  const HR_TODO = {
+    to_schedule: '面試官已安排好，需要你排面試時間',
+    offer: '已錄取，需要你追蹤意願與到職',
+    thanks: '面試不錄取，需要你在 104 寄發感謝函'
+  };
+  let filter = null, query = '', currentId = null, currentDetail = null, uploaded = { key: '', url: '' };
+
+  // 新增與編輯表單的欄位
+  const FORM_FIELDS = [
+    { k: '姓名', req: true }, { k: '性別', opt: '性別' },
+    { k: '年齡', type: 'number' }, { k: '手機', type: 'tel' },
+    { k: 'Email', type: 'email' }, { k: '現居' },
+    { k: '最高學歷', opt: '學歷' }, { k: '應徵管道', opt: '應徵管道' },
+    { k: '最高學歷學校科系', full: true }, { k: '次高學歷學校科系', full: true },
+    { k: '應徵職缺', full: true },
+    { k: '標案經驗', yn: true }, { k: '報告經驗', yn: true },
+    { k: '工作經歷', area: true }, { k: '其他專長', area: true }, { k: 'HR備註', area: true }
+  ];
+
+  bootApp(async () => {
+    $('#meName').textContent = App.me.name + '（' + App.me.role + '）';
+    if (App.me.role === '管理員' && App.appUrl) {
+      const a = $('#switchLink'); a.href = App.appUrl + '?page=manager'; a.hidden = false;
+    }
+    $('#btnRefresh').onclick = () => reloadAll(true);
+    $('#btnNew').onclick = openNewForm;
+    $('#btnBatch').onclick = openBatch;
+    $('#btnFeedback').onclick = openFeedback;
+    $('#q').oninput = e => { query = e.target.value.trim().toLowerCase(); renderList(); };
+    loadProjectList(() => { if (currentDetail && !App.editing) renderDetail(currentDetail); });
+    await reloadAll();
+    startPolling(() => reloadAll());
+  }, 'hr');
+
+  /** 已排面試後：給應徵者的說明連結 */
+  function jobLinksHtml(c) {
+    const ids = projectIdsOf(c);
+    if (!ids.length) return '';
+    const pl = App.projectList || { projects: [] };
+    const rows = ids.map(id => {
+      const p = pl.projects.find(x => x.id === id);
+      const url = (p && p.url) || (App.appUrl ? App.appUrl + '?page=job&p=' + encodeURIComponent(id) : '');
+      return '<div class="link-row"><div><b>' + esc(p ? p.name + '｜' + p.title : id) + '</b>' +
+        '<input class="link-box" readonly value="' + esc(url) + '"></div>' +
+        '<div class="link-btns"><button class="btn small" data-copy="' + esc(url) + '">複製連結</button>' +
+        '<a class="btn small" href="' + esc(url) + '" target="_blank" rel="noopener">預覽</a></div></div>';
+    }).join('');
+    return '<div class="section"><h3>給應徵者的計畫說明<button class="btn small" id="btnBrief">面試者資料</button><button class="btn small" id="btnMemo">面試官資料</button></h3>' +
+      '<p class="sub">把連結貼到 104 的面試邀約訊息，或按「面試者資料」下載 Word 附給應徵者。這兩者都不含面試題目。</p>' + rows + '</div>';
+  }
+
+  async function copyText(text, btn) {
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {
+      const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t);
+      t.select(); try { document.execCommand('copy'); } catch (e2) { /* 仍可手動複製 */ } t.remove();
+    }
+    if (btn) { const l = btn.textContent; btn.textContent = '已複製'; setTimeout(() => { btn.textContent = l; }, 1500); }
+    toast('已複製連結');
+  }
+
+  async function reloadAll(manual) {
+    try {
+      const res = await api('getCandidates');
+      App.version = res.version;
+      App.candidates = res.candidates;
+      if (filter === null) filter = HR_STAGES.find(s => HR_TODO[s] && count(s) > 0) || 'all';
+      renderPipeline(); renderList(); setSync(false);
+      refreshBadge();
+      if (currentId && !App.editing) await loadDetail(currentId, true);
+      if (manual) toast('已重新整理');
+    } catch (e) { toast(errMsg(e), true); }
+  }
+
+  function count(s) { return App.candidates.filter(c => stageOf(c) === s).length; }
+
+  function renderPipeline() {
+    const nav = $('#pipeline');
+    nav.innerHTML = HR_STAGES.map(s => {
+      const n = count(s), todo = HR_TODO[s] && n;
+      return '<button class="stage ' + STAGES[s].color + (todo ? ' todo' : '') + '" data-s="' + s + '" aria-pressed="' + (filter === s) + '"' +
+        (todo ? ' title="' + HR_TODO[s] + '"' : '') + '><span class="n">' + n + '</span><span class="l">' + STAGES[s].label + '</span></button>';
+    }).join('') +
+      '<button class="stage all" data-s="all" aria-pressed="' + (filter === 'all') + '"><span class="n">' + App.candidates.length + '</span><span class="l">全部</span></button>';
+    nav.querySelectorAll('.stage').forEach(b => b.onclick = () => { filter = b.dataset.s; renderPipeline(); renderList(); });
+  }
+
+  function renderList() {
+    let list = App.candidates.filter(c => filter === 'all' || stageOf(c) === filter);
+    if (query) {
+      list = list.filter(c => [c['姓名'], c['最高學歷學校科系'], c['次高學歷學校科系'], c['應徵職缺'], c['現居'], c['手機'], c['應徵者ID']]
+        .join(' ').toLowerCase().indexOf(query) >= 0);
+    }
+    list.sort((a, b) => filter === 'scheduled'
+      ? String(a['面試日期'] + a['面試時間']).localeCompare(String(b['面試日期'] + b['面試時間']))
+      : String(b['最後更新時間']).localeCompare(String(a['最後更新時間'])));
+    $('#count').textContent = list.length + ' 位';
+
+    if (!list.length) {
+      $('#rows').innerHTML = '<tr><td colspan="7" class="empty">' +
+        (query ? '找不到符合「' + esc(query) + '」的應徵者。' : '這個階段目前沒有應徵者。') + '</td></tr>';
+      return;
+    }
+    $('#rows').innerHTML = list.map(c => {
+      const id = c['應徵者ID'];
+      const gender = [c['性別'], c['年齡'] ? c['年齡'] + ' 歲' : ''].filter(Boolean).join('，');
+      return '<tr data-id="' + esc(id) + '"' + (id === currentId ? ' class="active"' : '') + '>' +
+        '<td><span class="name">' + esc(c['姓名']) + '</span>' + (hasFlag(c) ? '<span class="flag">待確認</span>' : '') +
+          '<span class="sub">' + esc(id) + '</span></td>' +
+        '<td>' + esc(shortJob(c['應徵職缺']) || '—') + '</td>' +
+        '<td>' + esc(c['最高學歷']) + '<span class="sub">' + esc(c['最高學歷學校科系']) + '</span></td>' +
+        '<td>' + esc(gender) + '</td>' +
+        '<td>' + pill(c) + '</td>' +
+        '<td>' + esc(c['面試日期']) + (c['面試時間'] ? ' ' + esc(c['面試時間']) : '') + '<span class="sub">' + esc([c['面試地點'], panelText(c)].filter(Boolean).join('｜')) + '</span></td>' +
+        '<td><span class="sub">' + esc(String(c['最後更新時間'] || '').slice(5)) + '<br>' + esc(c['最後更新者']) + '</span></td></tr>';
+    }).join('');
+    $('#rows').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
+  }
+
+  /* ===== 詳細資料 ===== */
+  async function openDetail(id) {
+    currentId = id; App.editing = false;
+    document.querySelectorAll('#rows tr[data-id]').forEach(tr => tr.classList.toggle('active', tr.dataset.id === id));
+    $('#drawer').hidden = false;
+    $('#drawerTitle').textContent = '';
+    $('#drawerBody').innerHTML = '<div class="loading">讀取中…</div>';
+    await loadDetail(id, false);
+  }
+
+  async function loadDetail(id, silent) {
+    try {
+      const d = await api('getCandidateDetail', id);
+      if (currentId !== id) return;
+      currentDetail = d; renderDetail(d);
+    } catch (e) {
+      if (!silent) $('#drawerBody').innerHTML = '<div class="empty">' + esc(errMsg(e)) + '</div>';
+    }
+  }
+
+  function closeDrawer() {
+    $('#drawer').hidden = true; currentId = null; App.editing = false;
+    document.querySelectorAll('#rows tr.active').forEach(tr => tr.classList.remove('active'));
+  }
+
+  function renderDetail(d) {
+    const c = d.candidate, s = stageOf(c), id = c['應徵者ID'];
+    $('#drawerTitle').innerHTML = esc(c['姓名']) + '<span class="sub">' + esc(id) + '</span>';
+    const flags = String(c['HR備註'] || '').split('；').filter(x => x.indexOf('⚠️') >= 0);
+
+    let h = '<div>' + pill(c) + '</div>';
+    if (flags.length) {
+      h += '<div class="section warn"><b>待確認事項</b><ul>' + flags.map(f => '<li>' + esc(f.replace('⚠️待確認：', '').replace('⚠️', '')) + '</li>').join('') +
+        '</ul>確認後，請在「基本資料 → 編輯」刪除 HR 備註中對應的文字。</div>';
+    }
+    h += '<div class="section"><h3>' + esc(actionTitle(c, s)) + '</h3><div class="action ' + STAGES[s].color + '">' + actionHtml(c, s) + '</div></div>';
+    if (s === 'screening' || s === 'assign') {
+      h += '<div class="section"><h3>HR 推薦計畫<button class="btn small" id="btnRec">儲存推薦</button></h3>' +
+        '<p class="sub" style="margin:0 0 6px">面試官認領時會預先勾選，主面試官可以改。</p><div id="recBox">' + projectPickerHtml(recIdsOf(c), '') + '</div></div>';
+    } else if (recIdsOf(c).length) {
+      h += '<div class="section"><h3>HR 推薦計畫</h3><p class="sub">' + esc(recIdsOf(c).map(projectName).join('、')) + '</p></div>';
+    }
+    if (s === 'to_schedule' || s === 'scheduled' || s === 'await_result' || s === 'eval') h += jobLinksHtml(c);
+    if (c['履歷檔連結']) h += '<div class="section"><button class="btn" id="btnResume">查看履歷</button></div>';
+    h += '<div class="section"><h3>基本資料<button class="btn small" id="btnEdit">編輯</button></h3><div id="infoBox">' + infoHtml(c) + '</div></div>';
+    if (c['HR備註']) h += '<div class="section"><h3>HR 備註</h3><div class="pre">' + esc(String(c['HR備註']).replace(/；/g, '\n')) + '</div></div>';
+    h += '<div class="section"><h3>面試評語（' + d.reviews.length + '）</h3>' + reviewsHtml(d.reviews) + '</div>';
+    h += '<div class="section"><details><summary>異動紀錄（' + d.history.length + '）</summary>' + historyHtml(d.history) + '</details></div>';
+
+    $('#drawerBody').innerHTML = h;
+    bindActions(c);
+    $('#btnEdit').onclick = () => editBasic(c);
+    if ($('#btnResume')) $('#btnResume').onclick = () => openResume(id, c['姓名']);
+  }
+
+  function actionTitle(c, s) {
+    if (c['結果'] === '錄取') return '錄取後進度';
+    return { screening: '等待主管初選', assign: '等待面試官認領', to_schedule: '安排面試時間', scheduled: '面試時間',
+      await_result: '等待面試結果', eval: '待評估', thanks: '寄發感謝函', closed: '已結案' }[s];
+  }
+
+  function actionHtml(c, s) {
+    const decline = '<button class="btn danger left" id="btnDecline">應徵者婉拒</button>';
+    if (c['結果'] === '錄取') {
+      return '<form id="fOffer" class="form">' +
+        '<label>錄取後進度<select name="post">' + opts('錄取後進度', c['錄取後進度']) + '</select></label>' +
+        '<label>預計到職日<input type="date" name="start" value="' + esc(toInputDate(c['預計到職日'])) + '"></label></form>' +
+        '<div class="row-btns"><button class="btn primary" id="btnOffer">更新進度</button></div>';
+    }
+    if (s === 'thanks') {
+      const h = ((currentDetail && currentDetail.history) || []).find(x => x['欄位'] === '結果' && x['新值'] === '感謝函');
+      const why = c['進度'] === '已面試' ? '面試後，' + (h ? esc(h['操作者']) : '主管') + ' 決定不錄取。' : '初選未通過（舊流程）。';
+      return '<p>' + why + (h ? '（' + esc(h['時間']) + '）' : '') + '</p>' +
+        '<p>請在 104 寄發感謝函給應徵者，寄出後按下方按鈕，這位應徵者就會移到「已結案」。' +
+        ((currentDetail && currentDetail.reviews.length) ? '面試官的說明請見下方「面試評語」。' : '') + '</p>' +
+        '<div class="row-btns"><button class="btn primary" id="btnThanks">已寄出感謝函</button></div>';
+    }
+    const team = '<p class="sub">主面試官：' + esc(c['主面試官'] || '尚未認領') +
+      (c['陪同面試官'] || c['其他陪同'] ? '｜陪同：' + esc([c['陪同面試官'], c['其他陪同']].filter(Boolean).join('、')) : '') +
+      (c['面試地點'] ? '｜地點：' + esc(c['面試地點']) : '') +
+      (c['初選者'] ? '｜初選：' + esc(c['初選者']) : '') + '</p>';
+    if (s === 'assign') {
+      return team + '<p>' + (c['主面試官'] ? '等待主面試官選擇面試計畫，選好後就可以排時間。' : '等待面試官認領（第一位認領的是主面試官）。') + '</p>' +
+        (c['主面試官'] ? '<div class="sub" style="margin-top:6px">面試官可面試時間：</div><div id="availBox" data-mode="view"></div>' : '') +
+        '<div class="row-btns">' + decline + '</div>';
+    }
+    if (s === 'to_schedule' || s === 'scheduled') {
+      return team + (s === 'to_schedule' ? '<p>面試官已安排好。請看下方面試官都方便的時段，和應徵者約好後填入；排定後系統會寄信通知面試官與所長。</p>' +
+        '<div id="availBox" data-mode="hr"></div>' : '') +
+        '<form id="fSchedule" class="form">' +
+        '<label><span class="req">面試日期</span><input type="date" name="date" required value="' + esc(toInputDate(c['面試日期'])) + '"></label>' +
+        '<label>面試時間<input type="time" name="time" value="' + esc(c['面試時間']) + '"></label>' +
+        '<div class="full loc-ro"><span class="sub">面試地點</span>' + (c['面試地點']
+          ? '<b>' + esc(c['面試地點']) + '</b><span class="sub">（主面試官選定；要改請通知主面試官或所長）</span>'
+          : '<b class="warn-t">尚未決定</b><span class="sub">請主面試官先選面試地點</span>') + '</div>' +
+        '<div class="full">' + projectPickerHtml(projectIdsOf(c), '主面試官已選，必要時可修改') + '</div></form>' +
+        '<div class="row-btns">' + decline + '<button class="btn primary" id="btnSchedule"' + (c['面試地點'] ? '' : ' disabled title="請主面試官先選面試地點"') + '>' + (s === 'to_schedule' ? '排定面試' : '更新面試時間') + '</button></div>';
+    }
+    const text = {
+      screening: '主管會決定是否約面試；不約面試的會直接結案，不需要寄感謝函。',
+      await_result: '面試已完成，等待主面試官或所長給結果。',
+      eval: '主管還在評估（待評估），有結果才會通知你。',
+      closed: '結果：' + statusText(c) + (c['感謝函寄出日'] ? '（' + c['感謝函寄出日'] + '）' : '') +
+        (c['結果'] === '不約面試' && c['初選者'] ? '，' + c['初選者'] + ' 決定' : '') + '。'
+    }[s];
+    return '<p>' + esc(text) + '</p>' + (s === 'closed' ? '' : '<div class="row-btns">' + decline + '</div>');
+  }
+
+  function bindActions(c) {
+    const id = c['應徵者ID'];
+    ['#fSchedule', '#fOffer'].forEach(sel => { const f = $(sel); if (f) f.addEventListener('input', () => { App.editing = true; }); });
+
+    if ($('#btnSchedule')) $('#btnSchedule').onclick = async e => {
+      const d = formData($('#fSchedule'));
+      if (!d.date) { toast('請填面試日期', true); return; }
+      const hasPicker = !!$('#fSchedule .pp-chip');
+      const proj = hasPicker ? pickedProjects($('#fSchedule')) : null;
+      if (hasPicker && !proj.length) { toast('請至少保留一個面試計畫', true); return; }
+      const btn = e.target;
+      const r = await withBusy(btn, () => api('scheduleInterview', id, d.date, d.time, null, proj));
+      if (r) { App.editing = false; toast('已排定面試，已通知面試官與所長'); await reloadAll(); }
+    };
+    if ($('#fSchedule')) bindProjectPicker($('#fSchedule'));
+    if ($('#recBox')) {
+      bindProjectPicker($('#recBox'));
+      $('#recBox').addEventListener('change', () => { App.editing = true; });
+      $('#btnRec').onclick = async e => {
+        const r = await withBusy(e.target, () => api('setRecommendedProjects', id, pickedProjects($('#recBox'))));
+        if (r) { App.editing = false; toast('已儲存推薦計畫'); await reloadAll(); }
+      };
+    }
+    if ($('#availBox')) mountAvail($('#availBox'), id, $('#availBox').dataset.mode, slot => {
+      const f = $('#fSchedule'); if (!f) return;
+      f.elements['date'].value = slot.slice(0, 10); f.elements['time'].value = slot.slice(11);
+      App.editing = true; toast('已帶入 ' + slot.slice(5).replace('-', '/') + '，和應徵者確認後按「排定面試」');
+    });
+    $('#drawerBody').querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copyText(b.dataset.copy, b));
+    if ($('#btnMemo')) $('#btnMemo').onclick = () => openInterviewMemo(id, c['姓名']);
+    if ($('#btnBrief')) $('#btnBrief').onclick = () => openCandidateBrief(id, c['姓名']);
+    if ($('#btnOffer')) $('#btnOffer').onclick = async e => {
+      const d = formData($('#fOffer'));
+      const r = await withBusy(e.target, () => api('setPostOffer', id, d.post, d.start));
+      if (r) { App.editing = false; toast('已更新錄取後進度'); await reloadAll(); }
+    };
+    if ($('#btnThanks')) $('#btnThanks').onclick = async () => {
+      const a = await confirmDialog({ title: '確認已寄出給「' + c['姓名'] + '」的感謝函？', message: '標記後這位應徵者會移到「已結案」，所長也不能再更改結果。', okText: '已寄出' });
+      if (!a.ok) return;
+      try { await api('markThankYouSent', id); toast('已標記感謝函寄出'); await reloadAll(); }
+      catch (e) { toast(errMsg(e), true); }
+    };
+    if ($('#btnDecline')) $('#btnDecline').onclick = async () => {
+      const a = await confirmDialog({
+        title: '標記「' + c['姓名'] + '」為應徵者婉拒？',
+        message: '標記後這位應徵者會移到「已結案」。',
+        input: { label: '原因（選填）', placeholder: '例如：已接受其他工作' },
+        okText: '標記婉拒', danger: true
+      });
+      if (!a.ok) return;
+      try { await api('markApplicantDeclined', id, a.value); toast('已標記應徵者婉拒'); await reloadAll(); }
+      catch (e) { toast(errMsg(e), true); }
+    };
+  }
+
+  /* ===== 表單欄位 ===== */
+  function fieldHtml(f, v) {
+    v = v === null || v === undefined ? '' : v;
+    const label = '<span' + (f.req ? ' class="req"' : '') + '>' + esc(f.k) + '</span>';
+    let input;
+    if (f.opt) input = '<select name="' + f.k + '">' + opts(f.opt, v, '') + '</select>';
+    else if (f.yn) input = '<select name="' + f.k + '"><option value="">無</option><option' + (v === '有' ? ' selected' : '') + '>有</option></select>';
+    else if (f.area) input = '<textarea name="' + f.k + '">' + esc(v) + '</textarea>';
+    else input = '<input name="' + f.k + '" type="' + (f.type || 'text') + '" value="' + esc(v) + '"' +
+      (f.req ? ' required' : '') + (f.type === 'number' ? ' min="15" max="90"' : '') + '>';
+    return '<label' + (f.area || f.full ? ' class="full"' : '') + '>' + label + input + '</label>';
+  }
+
+  function editBasic(c) {
+    App.editing = true;
+    $('#btnEdit').hidden = true;
+    $('#infoBox').innerHTML = '<form id="fBasic" class="form">' + FORM_FIELDS.map(f => fieldHtml(f, c[f.k])).join('') + '</form>' +
+      '<div class="row-btns"><button class="btn" id="btnCancelEdit">取消</button><button class="btn primary" id="btnSaveBasic">儲存</button></div>';
+    $('#btnCancelEdit').onclick = () => { App.editing = false; renderDetail(currentDetail); };
+    $('#btnSaveBasic').onclick = async e => {
+      const f = $('#fBasic');
+      if (!f.reportValidity()) return;
+      const r = await withBusy(e.target, () => api('updateBasicInfo', c['應徵者ID'], formData(f)));
+      if (r) { App.editing = false; toast('已儲存'); await reloadAll(); }
+    };
+  }
+
+  /* ===== 新增應徵者 ===== */
+  function openNewForm() {
+    App.editing = true;
+    uploaded = { key: '', url: '', b64: '', b64key: '' };
+    openModal('<h2>新增應徵者</h2>' +
+      '<div class="form"><label class="full">履歷檔（PDF 或圖片，選填）<input type="file" id="nfFile" accept=".pdf,application/pdf,image/*"></label></div>' +
+      '<div id="parseBox" class="parse-box" aria-live="polite"></div>' +
+      '<form id="fNew" class="form" style="margin-top:12px">' + FORM_FIELDS.map(f => fieldHtml(f, '')).join('') + '</form>' +
+      '<div id="nfProj" style="margin-top:12px">' + projectPickerHtml([], '推薦給面試官的計畫，選填，可複選') + '</div>' +
+      '<div id="dupBox" class="dup"></div>' +
+      '<div class="row-btns"><button class="btn" id="nfCancel">取消</button><button class="btn primary" id="nfSave">建立應徵者</button></div>');
+    App.onModalClose = () => { App.editing = false; };
+    const f = $('#fNew');
+    f.elements['姓名'].addEventListener('blur', checkDup);
+    f.elements['手機'].addEventListener('blur', checkDup);
+    $('#nfFile').addEventListener('change', onResumeSelected);
+    bindProjectPicker($('#nfProj'));
+    $('#nfCancel').onclick = closeModal;
+    $('#nfSave').onclick = e => saveNew(e.target, false);
+  }
+
+  function fileKey(file) { return file.name + '|' + file.size + '|' + file.lastModified; }
+
+  /* 選好履歷檔後，送去自動解析並帶入表單 */
+  async function onResumeSelected() {
+    const file = $('#nfFile').files[0], box = $('#parseBox');
+    box.className = 'parse-box';
+    if (!file) { box.textContent = ''; return; }
+    if (file.size > 15 * 1024 * 1024) { box.textContent = '檔案超過 15 MB，無法上傳。'; return; }
+    const saveBtn = $('#nfSave');
+    saveBtn.disabled = true;
+    box.textContent = '正在讀取履歷並自動帶入資料，大約需要 10 到 30 秒…';
+    try {
+      const b64 = await fileToBase64(file);
+      uploaded.b64 = b64; uploaded.b64key = fileKey(file);
+      const res = await api('parseResume', b64, file.type || 'application/pdf');
+      if (!$('#nfFile') || $('#nfFile').files[0] !== file) return; // 期間換了檔案或關掉視窗
+      if (res.disabled) { box.textContent = '已選好履歷檔，請手動填寫下方資料，建立時會一起上傳。'; return; }
+      const n = fillForm(res.fields);
+      if (n) {
+        box.className = 'parse-box ok';
+        box.textContent = '已自動帶入 ' + n + ' 個欄位（黃框）。AI 可能讀錯，請逐一和履歷核對後再建立。';
+      } else {
+        box.textContent = '沒有從履歷讀到可用的資料，請手動填寫。';
+      }
+      checkDup();
+    } catch (e) {
+      if ($('#parseBox')) {
+        box.innerHTML = '自動帶入失敗：' + esc(errMsg(e)) +
+          '<div class="row-btns" style="justify-content:flex-start;margin-top:6px">' +
+          '<button type="button" class="btn small" id="btnReparse">重新辨識</button>' +
+          '<span class="sub">或直接手動填寫，履歷檔仍會一起上傳。</span></div>';
+        $('#btnReparse').onclick = onResumeSelected;
+      }
+    } finally {
+      if ($('#nfSave')) saveBtn.disabled = false;
+    }
+  }
+
+  /** 以履歷內容為準填入欄位；HR 在自動帶入後親手改過的欄位，重新辨識時不會被蓋掉 */
+  function fillForm(fields) {
+    const f = $('#fNew'); let n = 0;
+    Object.keys(fields || {}).forEach(k => {
+      const el = f.elements[k], v = fields[k];
+      if (!el || v === '' || v === null || v === undefined || el.dataset.fixed) return;
+      if (el.tagName === 'SELECT' && !Array.prototype.some.call(el.options, o => o.value === String(v))) return;
+      el.value = String(v);
+      el.classList.add('auto');
+      el.addEventListener('input', () => { el.classList.remove('auto'); el.dataset.fixed = '1'; }, { once: true });
+      n++;
+    });
+    return n;
+  }
+
+  async function checkDup() {
+    const f = $('#fNew'); if (!f) return;
+    const name = f.elements['姓名'].value.trim(), phone = f.elements['手機'].value.trim();
+    if (!name && !phone) { $('#dupBox').innerHTML = ''; return; }
+    try { showDup(await api('checkDuplicate', name, phone), false); } catch (e) { /* 檢查失敗不擋建檔，送出時後端還會再檢查 */ }
+  }
+
+  function showDup(list, blocking) {
+    const box = $('#dupBox'); if (!box) return;
+    if (!list.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="warn"><b>系統裡已有相同姓名或電話的應徵者：</b><ul>' +
+      list.map(d => '<li>' + esc(d.id) + '　' + esc(d.name) + (d.phone ? '（' + esc(d.phone) + '）' : '') + '　' +
+        esc(shortJob(d.job) || '未填職缺') + '　' + esc(d.result || d.progress) + '　' + esc(d.created) + ' 建檔</li>').join('') + '</ul>' +
+      (blocking ? '<p style="margin:8px 0 0">如果確定是不同人，或是同一人應徵新的職缺，可以仍然建立新資料。</p>' +
+        '<div class="row-btns"><button class="btn" id="dupForce">仍要建立</button></div>' : '') + '</div>';
+    if (blocking) $('#dupForce').onclick = e => saveNew(e.target, true);
+  }
+
+  async function saveNew(btn, force) {
+    const f = $('#fNew');
+    if (!f.reportValidity()) return;
+    const data = formData(f);
+    data['推薦計畫'] = pickedProjects($('#nfProj'));
+    const file = $('#nfFile').files[0];
+    const r = await withBusy(btn, async () => {
+      if (file) {
+        const key = fileKey(file);
+        if (uploaded.key !== key) {
+          if (file.size > 15 * 1024 * 1024) throw new Error('檔案超過 15 MB。');
+          const b64 = uploaded.b64key === key ? uploaded.b64 : await fileToBase64(file);
+          const up = await api('uploadResume', b64, file.name, file.type);
+          uploaded = { key: key, url: up.url };
+        }
+        data['履歷檔連結'] = uploaded.url;
+      }
+      return api('createCandidate', data, force);
+    });
+    if (!r) return;
+    if (!r.ok) { showDup(r.duplicates, true); toast('發現可能重複的資料，請確認後再建立', true); return; }
+    App.onModalClose = null; App.editing = false; closeModal();
+    toast('已建立 ' + data['姓名'] + '（' + r.id + '）');
+    filter = 'screening';
+    await reloadAll();
+    openDetail(r.id);
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const rd = new FileReader();
+      rd.onload = () => resolve(String(rd.result).split(',')[1]);
+      rd.onerror = () => reject(new Error('讀取檔案失敗'));
+      rd.readAsDataURL(file);
+    });
+  }
+
+  /* ===== 批量上傳履歷：逐份 AI 辨識 → HR 核對 → 一次建檔 ===== */
+  const BATCH_MAX = 20;
+  /*
+   * 批量上傳用自己的面板，不用共用的對話框：
+   * 點旁邊空白或按 Esc 不會關掉（Esc 會縮小）；關閉前還有沒建檔的會先確認；
+   * 可以「縮小」到右下角，辨識在背景繼續跑，點一下就能打開回來。
+   */
+  let BATCH = null;
+
+  function openBatch() {
+    if (!BATCH) BATCH = { items: [], aborted: false, running: false, created: 0 };
+    buildBatchPanel(BATCH);
+    showBatchPanel(true);
+  }
+
+  function batchPending(st) {
+    return st.running || st.items.some(x => x.status === 'wait' || x.status === 'parsing' || x.status === 'ready');
+  }
+
+  function buildBatchPanel(st) {
+    if ($('#bp')) return;
+    const ov = document.createElement('div');
+    ov.id = 'bp'; ov.className = 'bp-overlay';
+    ov.innerHTML = '<div class="bp-card" role="dialog" aria-modal="true" aria-labelledby="bpTitle">' +
+      '<div class="bp-head"><h2 id="bpTitle">批量上傳履歷</h2>' +
+        '<button type="button" class="btn small" id="bMin" title="縮小到右下角，辨識會繼續進行">縮小</button>' +
+        '<button type="button" class="btn small" id="bClose">關閉</button></div>' +
+      '<p class="sub" style="margin:0 0 10px">一次選多份 104 履歷 PDF（最多 ' + BATCH_MAX + ' 份）。系統會逐份用 AI 辨識，每份約 10 到 30 秒。' +
+        '辨識時可以按「縮小」去做別的事，辨識會在背景繼續。辨識完請核對姓名、手機與應徵職缺，再一次建檔；建檔後會標記「待確認」。</p>' +
+      '<div class="form"><label class="full">履歷檔<input type="file" id="bFiles" multiple accept=".pdf,application/pdf"></label></div>' +
+      '<details id="bAllBox" class="b-all"><summary>推薦計畫：全部套用（選填）</summary>' +
+        '<div id="bAll">' + projectPickerHtml([], '選好後按「套用到全部」，也可以在下方每一列各自調整') + '</div>' +
+        '<div class="row-btns" style="margin-top:6px"><button type="button" class="btn small" id="bApply">套用到全部</button></div></details>' +
+      '<div id="bList" class="batch"></div>' +
+      '<div class="row-btns"><span id="bInfo" class="sub left"></span>' +
+        '<button class="btn" id="bRetry" hidden>重新辨識失敗的項目</button>' +
+        '<button class="btn primary" id="bSave" disabled>建立勾選的應徵者</button></div>' +
+      '<div id="bAsk" class="bp-ask" hidden></div></div>';
+    document.body.appendChild(ov);
+
+    const pill = document.createElement('button');
+    pill.id = 'bPill'; pill.type = 'button'; pill.className = 'bp-pill'; pill.hidden = true;
+    pill.onclick = () => showBatchPanel(true);
+    document.body.appendChild(pill);
+
+    $('#bMin').onclick = () => showBatchPanel(false);
+    $('#bClose').onclick = () => closeBatch(false);
+    $('#bFiles').onchange = () => {
+      const files = Array.from($('#bFiles').files || []);
+      if (files.length > BATCH_MAX) { toast('一次最多 ' + BATCH_MAX + ' 份，已取前 ' + BATCH_MAX + ' 份', true); }
+      const all = pickedProjects($('#bAll'));
+      st.items = files.slice(0, BATCH_MAX).map((f, i) => ({ i: i, file: f, proj: all.slice(), open: false, status: f.size > 15 * 1024 * 1024 ? 'error' : 'wait',
+        err: f.size > 15 * 1024 * 1024 ? '檔案超過 15 MB' : '', fields: {}, dups: [], pick: true }));
+      $('#bFiles').disabled = true;
+      drawBatch(st); runBatch(st);
+    };
+    $('#bSave').onclick = e => saveBatch(st, e.target);
+    $('#bRetry').onclick = () => {
+      st.items.filter(x => x.parseFailed).forEach(x => { x.status = 'wait'; x.parseFailed = false; x.err = ''; x.fields = {}; });
+      drawBatch(st); runBatch(st);
+    };
+    bindProjectPicker($('#bAll'));
+    $('#bApply').onclick = () => {
+      const ids = pickedProjects($('#bAll'));
+      st.items.forEach(it => { it.proj = ids.slice(); });
+      drawBatch(st);
+      toast(ids.length ? '已把推薦計畫套用到全部 ' + st.items.length + ' 份' : '已清除全部的推薦計畫');
+    };
+    drawBatch(st);
+  }
+
+  function showBatchPanel(open) {
+    if (!$('#bp')) return;
+    $('#bp').hidden = !open;
+    $('#bPill').hidden = open;
+    if (BATCH) updateBatchInfo(BATCH);
+  }
+
+  /** 面板內的確認（不用共用對話框，避免蓋掉批量上傳的內容） */
+  function batchAsk(message, buttons) {
+    return new Promise(resolve => {
+      const box = $('#bAsk');
+      box.innerHTML = '<div class="bp-ask-card"><p>' + esc(message) + '</p><div class="row-btns">' +
+        buttons.map((b, i) => '<button type="button" class="btn ' + (b.cls || '') + '" data-i="' + i + '">' + esc(b.label) + '</button>').join('') + '</div></div>';
+      box.hidden = false;
+      box.querySelectorAll('[data-i]').forEach(btn => btn.onclick = () => { box.hidden = true; box.innerHTML = ''; resolve(buttons[+btn.dataset.i].value); });
+    });
+  }
+
+  async function closeBatch(force) {
+    const st = BATCH;
+    if (!st) return;
+    if (!force && batchPending(st)) {
+      const left = st.items.filter(x => x.status !== 'done' && x.status !== 'error').length;
+      const v = await batchAsk('還有 ' + left + ' 份履歷沒有建檔' + (st.running ? '，而且還在辨識中' : '') + '。關閉後辨識結果會消失，需要重新上傳。',
+        [{ label: '取消', value: 'cancel' }, { label: '縮小到角落', value: 'min' }, { label: '仍要關閉', value: 'close', cls: 'danger' }]);
+      if (v === 'min') return showBatchPanel(false);
+      if (v !== 'close') return;
+    }
+    st.aborted = true;
+    if ($('#bp')) $('#bp').remove();
+    if ($('#bPill')) $('#bPill').remove();
+    BATCH = null;
+    if (st.created) reloadAll();
+  }
+
+  // Esc：批量上傳開著時只縮小，不關閉
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && $('#bp') && !$('#bp').hidden) { e.stopImmediatePropagation(); showBatchPanel(false); }
+  }, true);
+  // 重新整理或關閉分頁時提醒（瀏覽器允許時會跳出確認）
+  window.addEventListener('beforeunload', e => {
+    if (BATCH && batchPending(BATCH)) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  function drawBatch(st) {
+    const box = $('#bList'); if (!box) return;
+    const label = { wait: '等待中', parsing: '辨識中…', ready: '可建檔', error: '失敗', done: '已建檔' };
+    box.innerHTML = '<table class="list"><thead><tr><th></th><th>檔案</th><th>姓名</th><th>手機</th><th>應徵職缺</th><th>學歷</th><th>推薦計畫</th><th>狀態</th></tr></thead><tbody>' +
+      st.items.map(it => {
+        const f = it.fields, ok = it.status === 'ready';
+        const inp = (k, w) => '<input data-i="' + it.i + '" data-k="' + k + '" value="' + esc(f[k] || '') + '" style="width:' + w + '"' + (ok ? '' : ' disabled') + '>';
+        return '<tr class="' + it.status + '"><td><input type="checkbox" data-pick="' + it.i + '"' + (it.pick && ok ? ' checked' : '') + (ok ? '' : ' disabled') + '></td>' +
+          '<td class="fn">' + esc(it.file.name) + '</td><td>' + inp('姓名', '7em') + '</td><td>' + inp('手機', '9em') + '</td><td>' + inp('應徵職缺', '14em') + '</td>' +
+          '<td><span class="sub">' + esc([f['最高學歷'], f['最高學歷學校科系']].filter(Boolean).join(' ')) + '</span></td>' +
+          '<td><span class="b-proj">' + esc(it.proj.map(projectName).join('、') || '—') + '</span>' +
+            (it.status !== 'done' ? ' <button type="button" class="btn small" data-open="' + it.i + '">' + (it.open ? '收起' : '選擇') + '</button>' : '') + '</td>' +
+          '<td>' + (it.parseFailed ? '<span style="color:#b3261e">辨識失敗</span>' : esc(label[it.status])) + (it.err ? '<span class="sub">' + esc(it.err) + '</span>' : '') +
+            (it.dups.length ? '<span class="dupw">可能重複：' + esc(it.dups.map(d => d.id + ' ' + d.name).join('、')) + '</span>' : '') + '</td></tr>' +
+          (it.open && it.status !== 'done' ? '<tr class="pick-row"><td colspan="8"><div data-pick-box="' + it.i + '">' + projectPickerHtml(it.proj, esc(it.file.name) + ' 的推薦計畫') + '</div></td></tr>' : '');
+      }).join('') + '</tbody></table>';
+    box.querySelectorAll('input[data-k]').forEach(el => el.oninput = () => { st.items[+el.dataset.i].fields[el.dataset.k] = el.value; });
+    box.querySelectorAll('input[data-pick]').forEach(el => el.onchange = () => { st.items[+el.dataset.pick].pick = el.checked; updateBatchInfo(st); });
+    box.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { const it = st.items[+b.dataset.open]; it.open = !it.open; drawBatch(st); });
+    box.querySelectorAll('[data-pick-box]').forEach(pb => {
+      const it = st.items[+pb.dataset.pickBox];
+      bindProjectPicker(pb);
+      pb.addEventListener('change', () => {
+        it.proj = pickedProjects(pb);
+        const cell = pb.closest('tr').previousElementSibling.querySelector('.b-proj');
+        if (cell) cell.textContent = it.proj.map(projectName).join('、') || '—';
+      });
+    });
+    updateBatchInfo(st);
+  }
+
+  function updateBatchInfo(st) {
+    if (!$('#bInfo')) return;
+    const n = k => st.items.filter(x => x.status === k).length;
+    const picked = st.items.filter(x => x.status === 'ready' && x.pick).length;
+    $('#bInfo').textContent = '共 ' + st.items.length + ' 份：可建檔 ' + n('ready') + '、失敗 ' + n('error') + '、已建檔 ' + n('done') +
+      (st.running ? '，辨識中…' : '');
+    $('#bSave').disabled = st.running || !picked;
+    $('#bRetry').hidden = st.running || !st.items.some(x => x.parseFailed);
+    if ($('#bPill')) {
+      const total = st.items.length, done = st.items.filter(x => x.status !== 'wait' && x.status !== 'parsing').length;
+      $('#bPill').textContent = !total ? '批量上傳：尚未選檔案｜點此打開'
+        : st.running ? '批量上傳：辨識中 ' + done + ' / ' + total + '｜點此打開'
+        : picked ? '批量上傳：' + picked + ' 份可建檔｜點此打開' : '批量上傳：已完成｜點此打開';
+    }
+    $('#bSave').textContent = '建立勾選的 ' + picked + ' 位應徵者';
+  }
+
+  /** 連線類錯誤（HTTP 503、逾時、網路中斷）自動重試；其他錯誤直接丟出 */
+  async function callWithRetry(fn, onRetry) {
+    const waits = [6000, 15000];
+    for (let i = 0; ; i++) {
+      try { return await fn(); }
+      catch (e) {
+        const m = errMsg(e);
+        const transient = /NetworkError|HTTP 5\d\d|連線|逾時|timed? ?out|忙碌|Service invoked too many times|Address unavailable/i.test(m);
+        if (!transient || i >= waits.length) throw e;
+        if (onRetry) onRetry(i + 1, m);
+        await new Promise(r => setTimeout(r, waits[i]));
+      }
+    }
+  }
+
+  async function runBatch(st) {
+    st.running = true;
+    for (const it of st.items) {
+      if (st.aborted) return;
+      if (it.status !== 'wait') continue;
+      it.status = 'parsing'; it.err = ''; drawBatch(st);
+      const guessName = it.file.name.replace(/\.pdf$/i, '').replace(/^[A-Za-z]?\d+[_\-]\d+[_\-]?/, '').replace(/[_\-\d]+$/, '').trim();
+      try {
+        if (!it.b64) it.b64 = await fileToBase64(it.file);
+        const res = await callWithRetry(() => api('parseResume', it.b64, it.file.type || 'application/pdf'),
+          n => { it.err = '連線不穩，第 ' + n + ' 次重試中…'; drawBatch(st); });
+        it.fields = (res && res.fields) || {};
+        if (!it.fields['姓名']) it.fields['姓名'] = guessName;
+        it.err = res && res.disabled ? 'AI 辨識未開啟，請手動補資料' : (res && /^Claude/.test(res.model || '') ? '（由 Claude 辨識）' : '');
+        it.dups = await callWithRetry(() => api('checkDuplicate', it.fields['姓名'], it.fields['手機'] || ''));
+        it.pick = !it.dups.length;
+        it.status = 'ready';
+      } catch (e) {
+        // 辨識失敗也可以手動補資料後建檔，或之後按「重新辨識失敗的項目」
+        it.fields = { '姓名': guessName };
+        it.dups = [];
+        it.pick = false;
+        it.parseFailed = true;
+        it.status = 'ready';
+        it.err = 'AI 辨識失敗（' + errMsg(e) + '）。可手動填姓名、手機後勾選建檔，或稍後按「重新辨識失敗的項目」';
+      }
+      if (st.aborted) return;
+      drawBatch(st);
+    }
+    st.running = false; drawBatch(st);
+  }
+
+  async function saveBatch(st, btn) {
+    const todo = st.items.filter(x => x.status === 'ready' && x.pick);
+    if (todo.some(x => !String(x.fields['姓名'] || '').trim())) { toast('有勾選的履歷沒有姓名，請補上', true); return; }
+    if (todo.some(x => x.dups.length)) {
+      const v = await batchAsk('有 ' + todo.filter(x => x.dups.length).length + ' 位可能重複。勾選的人會照樣建立新資料，並在 HR 備註標記可能重複，確定嗎？',
+        [{ label: '取消', value: false }, { label: '照樣建立', value: true, cls: 'primary' }]);
+      if (!v) return;
+    }
+    btn.disabled = true; st.running = true;
+    for (const it of todo) {
+      if (st.aborted) break;
+      try {
+        const data = {};
+        FORM_FIELDS.forEach(f => {
+          const v = it.fields[f.k];
+          if (v === undefined || v === null || v === '') return;
+          if (f.opt && (App.options[f.opt] || []).indexOf(String(v)) < 0) return;   // 不在選項內的值不帶入，避免整筆失敗
+          if (f.yn && v !== '有') return;
+          if (f.k === '年齡' && !(parseInt(v, 10) >= 15 && parseInt(v, 10) <= 90)) return;
+          data[f.k] = String(v);
+        });
+        data['HR備註'] = '⚠️待確認：AI 批量辨識，請核對履歷' + (data['HR備註'] ? '；' + data['HR備註'] : '');
+        if (it.proj && it.proj.length) data['推薦計畫'] = it.proj;
+        const up = await callWithRetry(() => api('uploadResume', it.b64, it.file.name, it.file.type || 'application/pdf'));
+        data['履歷檔連結'] = up.url;
+        const r = await api('createCandidate', data, true);   // 建檔不自動重試，避免重複建立
+        if (!r.ok) throw new Error('建檔失敗');
+        it.status = 'done'; it.err = r.id; st.created = (st.created || 0) + 1;
+      } catch (e) { it.status = 'error'; it.err = errMsg(e); }
+      drawBatch(st);
+    }
+    st.running = false; drawBatch(st);
+    toast('已建立 ' + (st.created || 0) + ' 位應徵者');
+    filter = 'screening';
+    reloadAll();
+  }
+
+  /* ===== 主管回饋 ===== */
+  async function refreshBadge() {
+    try {
+      const fb = await api('getFeedback', 50);
+      const b = $('#fbBadge'); b.textContent = fb.unreadCount; b.hidden = !fb.unreadCount;
+    } catch (e) { /* 回饋讀取失敗不影響主畫面 */ }
+  }
+
+  async function openFeedback() {
+    openModal('<h2>主管回饋</h2><div class="loading">讀取中…</div>');
+    try {
+      const fb = await api('getFeedback', 50);
+      $('#modalCard').innerHTML = '<h2>主管回饋</h2>' +
+        (fb.items.length ? fb.items.map(i =>
+          '<button class="feed-item' + (i.unread ? ' unread' : '') + '" data-id="' + esc(i.id) + '">' +
+          '<div><b>' + esc(i.name || i.id) + '</b>　' + esc(i.text) + '</div>' +
+          '<div class="t">' + esc(i.who) + '　' + esc(i.time) + (i.unread ? '　未讀' : '') + '</div></button>').join('')
+          : '<p class="empty">所長和面試官的操作會出現在這裡。</p>') +
+        '<div class="row-btns"><button class="btn primary" id="fbClose">關閉</button></div>';
+      $('#fbClose').onclick = closeModal;
+      $('#modalCard').querySelectorAll('.feed-item').forEach(b => b.onclick = () => { closeModal(); openDetail(b.dataset.id); });
+      if (fb.unreadCount) { await api('markFeedbackRead'); $('#fbBadge').hidden = true; }
+    } catch (e) {
+      $('#modalCard').innerHTML = '<h2>主管回饋</h2><p>' + esc(errMsg(e)) + '</p><div class="row-btns"><button class="btn primary" onclick="closeModal()">關閉</button></div>';
+    }
+  }
+  </script>
+</body>
+</html>

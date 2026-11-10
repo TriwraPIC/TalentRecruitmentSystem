@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles') ?>
+  <style>
+    /* 主管決策按鈕：頁面上最重要的操作，做成大而清楚的圖示按鈕 */
+    .decide { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-top: 4px; }
+    .act {
+      display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer;
+      padding: 14px 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md);
+      background: #fff; color: var(--c, var(--ink)); font-weight: 700; font-size: 15px;
+    }
+    .act svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .act small { font-weight: 400; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.4; }
+    .act:hover { border-color: var(--c); background: color-mix(in srgb, var(--c) 6%, #fff); }
+    .act.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 13%, #fff); box-shadow: inset 0 0 0 1px var(--c); }
+    .act[disabled] { opacity: .5; cursor: wait; }
+    .top-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .top-row .btn:first-of-type { margin-left: auto; }
+    .mine { color: var(--s-offer); font-size: 12px; }
+    .c-thanks { --c: #b4532a; }
+    .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+    .board > .empty { grid-column: 1 / -1; }
+    .bcard { background: #fff; border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
+    .bcard:hover { border-color: var(--c-assign, #8a4f9e); }
+    .bcard.mine { border-left: 4px solid #8a4f9e; }
+    .bc-head { display: flex; align-items: baseline; gap: 8px; }
+    .bc-head .tag { margin-left: auto; font-size: 12px; color: #8a4f9e; font-weight: 700; }
+    .bc-team { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; align-items: center; }
+    .chip { background: #f1ecf4; color: #5d3470; border-radius: 999px; padding: 2px 10px; font-size: 13.5px; }
+    .chip.lead { background: #8a4f9e; color: #fff; font-weight: 700; }
+    .bc-proj { font-size: 13.5px; } .bc-proj b { margin-right: 8px; color: var(--muted); font-weight: 400; }
+    .warn-t { color: var(--warn); }
+    .bc-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+    .bc-btns { margin-left: auto; display: flex; gap: 6px; }
+    .team { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; background: #faf8fb; border: 1px solid #ece4f0; border-radius: var(--r-sm); padding: 8px 10px; margin: 0 0 10px; font-size: 14px; }
+    .team b { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+    .plan-box { margin-top: 12px; }
+    .loc-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; font-size: 14px; }
+    .loc-row select { padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 14.5px; }
+    .av-sec { margin-top: 14px; } .av-sec h4 { font-size: 14px; margin: 0 0 4px; } .av-sec h4 .sub { font-weight: 400; margin-left: 4px; }
+    .plan-box .others { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+    .plan-box .others input { padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 14.5px; }
+    .form-err { color: #b3261e; font-size: 13px; margin: 6px 0 0; }
+    @media (max-width: 640px) { .team { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">115 二所人力招募<small>主管工作台</small></div>
+    <div class="top-actions">
+      <span id="sync" class="sync"></span>
+      <button id="btnRefresh" class="btn ghost">重新整理</button>
+      <a id="switchLink" class="btn ghost" hidden>切換到 HR 頁</a>
+      <span id="meName" class="me"></span>
+    </div>
+  </header>
+
+  <main>
+    <nav id="pipeline" class="pipeline" aria-label="招募階段"></nav>
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="搜尋姓名、學校、職缺、專長" aria-label="搜尋">
+      <span id="count" class="count"></span>
+    </div>
+    <div id="board" class="board" hidden></div>
+    <div class="table-wrap">
+      <table class="list">
+        <thead><tr><th>姓名</th><th>應徵職缺</th><th>學歷</th><th>性別／年齡</th><th>現居</th><th>狀態</th><th>面試</th><th>評語</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="loading">讀取中…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+
+  <aside id="drawer" class="drawer" hidden aria-label="應徵者詳細資料">
+    <div class="drawer-head"><h2 id="drawerTitle"></h2><button class="x" onclick="closeDrawer()" aria-label="關閉">×</button></div>
+    <div id="drawerBody" class="drawer-body"></div>
+  </aside>
+
+  <div id="modal" class="modal" hidden><div id="modalCard" class="modal-card" role="dialog" aria-modal="true"></div></div>
+  <div id="toast" aria-live="polite"></div>
+
+  <?!= include('Common') ?>
+  <?!= include('Memo') ?>
+
+  <script>
+  /* ===== 主管頁面（所長、面試官） ===== */
+  const M_STAGES = ['screening', 'assign', 'to_schedule', 'scheduled', 'await_result', 'eval', 'offer', 'thanks', 'closed'];
+  let filter = null, query = '', currentId = null, currentDetail = null;
+
+  const IC = {
+    cal:   '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16.2 9.6"/></svg>',
+    star:  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.7 5.5 6 .9-4.35 4.25 1.03 6L12 17l-5.38 2.85 1.03-6L3.3 9.6l6-.9z"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>',
+    mail:  '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>',
+    x:     '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
+    hand:  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.4-3.6 2.6-5.6 5.5-5.6s5.1 2 5.5 5.6"/><path d="M18 8v6M15 11h6"/></svg>',
+    pen:   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>'
+  };
+
+  const isBoss = () => App.me.role === '所長' || App.me.role === '管理員';
+  const canInterview = () => App.me.role !== 'HR';
+  const canDecide = c => isBoss() || myPanelRole(c) === 'lead';
+
+  /** 需要目前使用者處理的階段 */
+  function todoStages() {
+    return isBoss()
+      ? { screening: '需要決定是否約面試', assign: '需要安排面試官', await_result: '需要給面試結果', eval: '待評估，需要做最後決定' }
+      : { screening: '可以決定是否約面試', assign: '可以認領面試' };
+  }
+
+  bootApp(async () => {
+    $('#meName').textContent = App.me.name + '（' + App.me.role + '）';
+    if (App.me.role === '管理員' && App.appUrl) {
+      const a = $('#switchLink'); a.href = App.appUrl + '?page=hr'; a.hidden = false;
+    }
+    $('#btnRefresh').onclick = () => reloadAll(true);
+    $('#q').oninput = e => { query = e.target.value.trim().toLowerCase(); renderList(); };
+    loadProjectList(() => { renderList(); if (currentDetail && !App.editing) renderDetail(currentDetail); });
+    await reloadAll();
+    startPolling(() => reloadAll());
+  }, 'manager');
+
+  async function reloadAll(manual) {
+    try {
+      const res = await api('getCandidates');
+      App.version = res.version;
+      App.candidates = res.candidates;
+      const todo = todoStages();
+      if (filter === null) filter = M_STAGES.find(s => todo[s] && count(s) > 0) || 'all';
+      renderPipeline(); renderList(); setSync(false);
+      if (currentId && !App.editing) await loadDetail(currentId, true);
+      if (manual) toast('已重新整理');
+    } catch (e) { toast(errMsg(e), true); }
+  }
+
+  function count(s) { return App.candidates.filter(c => stageOf(c) === s).length; }
+
+  function renderPipeline() {
+    const todo = todoStages(), nav = $('#pipeline');
+    nav.innerHTML = M_STAGES.map(s => {
+      const n = count(s), t = todo[s] && n;
+      return '<button class="stage ' + STAGES[s].color + (t ? ' todo' : '') + '" data-s="' + s + '" aria-pressed="' + (filter === s) + '"' +
+        (t ? ' title="' + todo[s] + '"' : '') + '><span class="n">' + n + '</span><span class="l">' + STAGES[s].label + '</span></button>';
+    }).join('') +
+      '<button class="stage all" data-s="all" aria-pressed="' + (filter === 'all') + '"><span class="n">' + App.candidates.length + '</span><span class="l">全部</span></button>';
+    nav.querySelectorAll('.stage').forEach(b => b.onclick = () => { filter = b.dataset.s; renderPipeline(); renderList(); });
+  }
+
+  function filtered() {
+    let list = App.candidates.filter(c => filter === 'all' || stageOf(c) === filter);
+    if (query) {
+      list = list.filter(c => [c['姓名'], c['最高學歷學校科系'], c['次高學歷學校科系'], c['應徵職缺'], c['現居'], c['工作經歷'], c['其他專長'], c['主面試官'], c['陪同面試官']]
+        .join(' ').toLowerCase().indexOf(query) >= 0);
+    }
+    list.sort((a, b) => filter === 'scheduled'
+      ? String(a['面試日期'] + a['面試時間']).localeCompare(String(b['面試日期'] + b['面試時間']))
+      : String(b['最後更新時間']).localeCompare(String(a['最後更新時間'])));
+    return list;
+  }
+
+  function renderList() {
+    const list = filtered();
+    $('#count').textContent = list.length + ' 位';
+    const board = filter === 'assign';
+    $('#board').hidden = !board;
+    $('.table-wrap').hidden = board;
+    if (board) return renderBoard(list);
+
+    if (!list.length) {
+      $('#rows').innerHTML = '<tr><td colspan="8" class="empty">' +
+        (query ? '找不到符合「' + esc(query) + '」的應徵者。' : '這個階段目前沒有應徵者。') + '</td></tr>';
+      return;
+    }
+    $('#rows').innerHTML = list.map(c => {
+      const id = c['應徵者ID'];
+      const gender = [c['性別'], c['年齡'] ? c['年齡'] + ' 歲' : ''].filter(Boolean).join('，');
+      const panel = panelText(c);
+      return '<tr data-id="' + esc(id) + '"' + (id === currentId ? ' class="active"' : '') + '>' +
+        '<td><span class="name">' + esc(c['姓名']) + '</span><span class="sub">' + esc(id) + '</span></td>' +
+        '<td>' + esc(shortJob(c['應徵職缺']) || '—') + '</td>' +
+        '<td>' + esc(c['最高學歷']) + '<span class="sub">' + esc(c['最高學歷學校科系']) + '</span></td>' +
+        '<td>' + esc(gender) + '</td>' +
+        '<td>' + esc(c['現居']) + '</td>' +
+        '<td>' + pill(c) + '</td>' +
+        '<td>' + esc(c['面試日期']) + (c['面試時間'] ? ' ' + esc(c['面試時間']) : '') +
+          '<span class="sub">' + esc([c['面試地點'], panel].filter(Boolean).join('｜')) + '</span></td>' +
+        '<td>' + (c.reviewCount ? c.reviewCount + ' 則' : '<span class="sub">—</span>') +
+          (c.myReviewDone ? '<span class="mine">你已填</span>' : '') + '</td></tr>';
+    }).join('');
+    $('#rows').querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
+  }
+
+  /* ===== 安排面試官：卡片看板 ===== */
+  function renderBoard(list) {
+    if (!list.length) {
+      $('#board').innerHTML = '<div class="empty">' + (query ? '找不到符合「' + esc(query) + '」的應徵者。' : '目前沒有等待安排面試官的應徵者。') + '</div>';
+      return;
+    }
+    $('#board').innerHTML = list.map(c => {
+      const id = c['應徵者ID'], role = myPanelRole(c);
+      const team = c['主面試官']
+        ? '<span class="chip lead">' + esc(c['主面試官']) + '　主面</span>' +
+          [c['陪同面試官'], c['其他陪同']].filter(Boolean).join('、').split(/[、,，]/).map(x => x.trim()).filter(Boolean)
+            .map(n => '<span class="chip">' + esc(n) + '</span>').join('')
+        : '<span class="sub">還沒有人認領，第一位按「我要主面」的就是主面試官</span>';
+      const rec = recIdsOf(c).map(projectName).join('、');
+      const proj = projectIdsOf(c).length ? esc(projectNames(c))
+        : (rec ? '<span class="sub">HR 推薦：' + esc(rec) + '</span>' + (c['主面試官'] ? '　<span class="warn-t">待主面試官確認</span>' : '')
+          : (c['主面試官'] ? '<span class="warn-t">待主面試官選計畫</span>' : '<span class="sub">—</span>'));
+      let btns = '';
+      if (canInterview()) {
+        btns += role ? '<button class="btn small" data-b="leave">退出</button>'
+          : '<button class="btn small primary" data-b="join">' + (c['主面試官'] ? '我要陪同' : '我要主面') + '</button>';
+      }
+      if (role === 'lead' || isBoss()) btns += '<button class="btn small" data-b="open">' + (projectIdsOf(c).length ? '調整' : '選計畫') + '</button>';
+      return '<div class="bcard' + (role ? ' mine' : '') + '" data-id="' + esc(id) + '">' +
+        '<div class="bc-head"><span class="name">' + esc(c['姓名']) + '</span><span class="sub">' + esc(id) + '</span>' +
+          (role === 'lead' ? '<span class="tag">你是主面</span>' : role === 'member' ? '<span class="tag">你是陪同</span>' : '') + '</div>' +
+        '<div class="sub">' + esc(shortJob(c['應徵職缺']) || '—') + '｜' + esc([c['最高學歷'], c['最高學歷學校科系']].filter(Boolean).join(' ')) + '</div>' +
+        '<div class="bc-team">' + team + '</div>' +
+        '<div class="bc-proj"><b>計畫</b>' + proj + '</div>' +
+        (c['主面試官'] ? '<div class="bc-proj"><b>地點</b>' + (c['面試地點'] ? esc(c['面試地點']) : '<span class="warn-t">待主面試官選擇</span>') + '</div>' : '') +
+        (c['主面試官'] ? '<div class="bc-proj"><b>時間</b>' + (c.availFilled || 0) + ' / ' + String(c['面試官名單'] || '').split(',').filter(Boolean).length + ' 位已填' +
+          (role && !myAvailDone(c) ? '　<span class="warn-t">你還沒填</span>' : '') + '</div>' : '') +
+        '<div class="bc-foot"><span class="sub">' + (c['初選者'] ? esc(c['初選者']) + ' 同意約面試' : '') + '</span><span class="bc-btns">' + btns + '</span></div></div>';
+    }).join('');
+    $('#board').querySelectorAll('.bcard').forEach(card => {
+      const id = card.dataset.id, c = App.candidates.find(x => x['應徵者ID'] === id);
+      card.onclick = e => {
+        const b = e.target.closest('[data-b]');
+        if (!b) return openDetail(id);
+        e.stopPropagation();
+        if (b.dataset.b === 'open') return openDetail(id);
+        doJoinLeave(b, c, b.dataset.b);
+      };
+    });
+  }
+
+  /** 列表資料沒有每個人的明細，只能從人數判斷：全部都填了就一定包含我 */
+  function myAvailDone(c) {
+    const n = String(c['面試官名單'] || '').split(',').filter(Boolean).length;
+    return n > 0 && (c.availFilled || 0) >= n;
+  }
+
+  async function doJoinLeave(btn, c, what) {
+    const id = c['應徵者ID'], name = c['姓名'];
+    if (what === 'leave') {
+      const lead = myPanelRole(c) === 'lead';
+      const a = await confirmDialog({ title: '退出「' + name + '」的面試？',
+        message: lead ? '你是主面試官，退出後由第一位陪同自動遞補為主面試官。' : '退出後就不會收到這場面試的通知。', okText: '退出' });
+      if (!a.ok) return;
+    }
+    btn.disabled = true;
+    try {
+      const r = await api(what === 'join' ? 'joinInterview' : 'leaveInterview', id);
+      toast(what === 'join' ? (myPanelRole(r) === 'lead' ? '你是 ' + name + ' 的主面試官，請選擇面試計畫' : '已加入 ' + name + ' 的面試（陪同）') : '已退出 ' + name + ' 的面試');
+      await reloadAll();
+      if (what === 'join' && myPanelRole(r) === 'lead') openDetail(id);
+    } catch (e) { toast(errMsg(e), true); }
+    finally { btn.disabled = false; }
+  }
+
+  /* ===== 詳細資料 ===== */
+  async function openDetail(id) {
+    currentId = id; App.editing = false;
+    document.querySelectorAll('#rows tr[data-id]').forEach(tr => tr.classList.toggle('active', tr.dataset.id === id));
+    $('#drawer').hidden = false;
+    $('#drawerTitle').textContent = '';
+    $('#drawerBody').innerHTML = '<div class="loading">讀取中…</div>';
+    await loadDetail(id, false);
+  }
+
+  async function loadDetail(id, silent) {
+    try {
+      const d = await api('getCandidateDetail', id);
+      if (currentId !== id) return;
+      currentDetail = d; renderDetail(d);
+    } catch (e) {
+      if (!silent) $('#drawerBody').innerHTML = '<div class="empty">' + esc(errMsg(e)) + '</div>';
+    }
+  }
+
+  function closeDrawer() {
+    $('#drawer').hidden = true; currentId = null; App.editing = false;
+    document.querySelectorAll('#rows tr.active').forEach(tr => tr.classList.remove('active'));
+  }
+
+  function myReview() {
+    return (currentDetail.reviews || []).find(r => String(r['面試官Email']).toLowerCase() === String(App.me.email).toLowerCase()) || {};
+  }
+
+  function renderDetail(d) {
+    const c = d.candidate, s = stageOf(c), id = c['應徵者ID'];
+    $('#drawerTitle').innerHTML = esc(c['姓名']) + '<span class="sub">' + esc(id) + '</span>';
+
+    let h = '<div class="top-row">' + pill(c) +
+      (c['面試計畫'] ? '<button class="btn" id="btnMemo">面試官資料</button><button class="btn" id="btnBrief">面試者資料</button>' : '') +
+      (c['履歷檔連結'] ? '<button class="btn primary" id="btnResume">查看履歷</button>' : '<span class="sub" style="margin-left:auto">未上傳履歷檔</span>') + '</div>';
+    h += '<div class="section"><h3>' + esc(decisionTitle(c, s)) + '</h3><div class="action ' + STAGES[s].color + '">' + decisionHtml(c, s) + '</div></div>';
+    h += '<div class="section"><h3>基本資料</h3>' + infoHtml(c) + '</div>';
+    if (c['HR備註']) h += '<div class="section"><h3>HR 備註</h3><div class="pre sub">' + esc(String(c['HR備註']).replace(/；/g, '\n')) + '</div></div>';
+    h += '<div class="section"><h3>面試評語（' + d.reviews.length + '）' +
+      (canInterview() && c['進度'] !== '待初選' && !['不約面試'].includes(c['結果']) ? '<button class="btn small" id="btnReview">' + (myReview()['評語ID'] ? '修改我的評語' : '填寫我的評語') + '</button>' : '') +
+      '</h3>' + reviewsHtml(d.reviews) + '</div>';
+    h += '<div class="section"><details><summary>異動紀錄（' + d.history.length + '）</summary>' + historyHtml(d.history) + '</details></div>';
+
+    $('#drawerBody').innerHTML = h;
+    bindProjectPicker($('#drawerBody'));
+    if ($('#planBox')) $('#planBox').addEventListener('input', () => { App.editing = true; });
+    if ($('#btnResume')) $('#btnResume').onclick = () => openResume(id, c['姓名']);
+    if ($('#btnMemo')) $('#btnMemo').onclick = () => openInterviewMemo(id, c['姓名']);
+    if ($('#btnBrief')) $('#btnBrief').onclick = () => openCandidateBrief(id, c['姓名']);
+    if ($('#btnReview')) $('#btnReview').onclick = () => openReviewForm(c);
+    $('#drawerBody').querySelectorAll('[data-act]').forEach(b => b.onclick = () => handleAct(b, c));
+    if ($('#availBox')) mountAvail($('#availBox'), id, myPanelRole(c) ? 'edit' : 'view');
+    if ($('#pLoc')) $('#pLoc').onchange = async e => {
+      const sel = e.target, loc = sel.value, prev = c['面試地點'] || '';
+      if (!loc) { sel.value = prev; return; }
+      if (c['面試日期']) {
+        const a = await confirmDialog({ title: '改成「' + loc + '」？', message: '這場面試已排定，改地點後系統會寄信通知面試官，也會通知原地點和新地點的行政。', okText: '確定修改' });
+        if (!a.ok) { sel.value = prev; return; }
+      }
+      sel.disabled = true;
+      try { await api('setInterviewLocation', id, loc); toast('面試地點已設為「' + loc + '」'); await reloadAll(); }
+      catch (err) { sel.value = prev; toast(errMsg(err), true); }
+      finally { sel.disabled = false; }
+    };
+  }
+
+  function decisionTitle(c, s) {
+    if (s === 'screening') return '初選';
+    if (s === 'assign' || s === 'to_schedule' || s === 'scheduled') return '面試安排';
+    if (c['進度'] === '已面試') return '面試結果';
+    return '結果';
+  }
+
+  function act(label, key, color, icon, hint, on) {
+    return '<button class="act ' + color + (on ? ' on' : '') + '" data-act="' + key + '">' + icon + label +
+      (hint ? '<small>' + esc(hint) + '</small>' : '') + '</button>';
+  }
+
+  function decisionHtml(c, s) {
+    const r = c['結果'], who = c['初選者'];
+    if (s === 'screening') {
+      if (!canInterview()) return '<p>等待主管初選。</p>';
+      return '<p>看完履歷後，決定是否約這位應徵者面試。以第一個按的人為準。</p><div class="decide">' +
+        act('約面試', 'screen-yes', 'c-assign', IC.cal, '接著由面試官認領') +
+        act('不約面試', 'screen-no', 'c-closed', IC.x, '直接結案，不寄感謝函') + '</div>';
+    }
+    if (r === '不約面試') {
+      return '<p>初選結果：不約面試' + (who ? '（' + esc(who) + ' 決定）' : '') + '，已結案，不寄感謝函。</p>' +
+        (isBoss() ? '<div class="row-btns"><button class="btn" data-act="screen-yes">改為約面試</button></div>' : '');
+    }
+    if (r === '感謝函' && c['進度'] !== '已面試') {
+      if (c['感謝函寄出日']) return '<p>初選未通過，HR 已於 ' + esc(c['感謝函寄出日']) + ' 寄出感謝函。</p>';
+      return '<p>初選未通過（舊流程），等待 HR 寄發感謝函。</p>';
+    }
+    if (s === 'assign' || s === 'to_schedule' || s === 'scheduled') return panelHtml(c, s);
+
+    if (c['進度'] === '已面試' && r !== '應徵者婉拒') {
+      let h = '<p class="sub">' + esc(panelText(c)) + '</p>';
+      if (c['感謝函寄出日']) return h + '<p>不錄取，HR 已於 ' + esc(c['感謝函寄出日']) + ' 寄出感謝函，結果無法再更改。</p>';
+      if (r === '錄取') h += '<p>錄取後進度：' + esc(c['錄取後進度'] || '確認意願中') + (c['預計到職日'] ? '，預計 ' + esc(c['預計到職日']) + ' 到職' : '') + '</p>';
+      else if (!r) h += '<p>面試已完成，等待主面試官或所長給結果。</p>';
+      if (canDecide(c)) {
+        h += '<div class="decide">' +
+          act('錄取', 'res-錄取', 'c-offer', IC.star, '回傳 HR 確認報到', r === '錄取') +
+          act('待評估', 'res-評估中', 'c-eval', IC.clock, '先保留，不通知 HR', r === '評估中') +
+          act('不錄取', 'res-感謝函', 'c-closed', IC.mail, '回傳 HR 寄感謝函', r === '感謝函') + '</div>';
+      } else if (r) {
+        h += '<p>面試結果：' + esc(RESULT_LABEL[r] || r) + '</p>';
+      }
+      return h;
+    }
+    return '<p>' + esc(statusText(c)) + '。</p>';
+  }
+
+  /** 安排面試官／等待排時間／已排面試 */
+  function panelHtml(c, s) {
+    const role = myPanelRole(c), chosen = projectIdsOf(c), rec = recIdsOf(c);
+    const picked = chosen.length ? chosen : rec;   // 還沒選計畫時，預先勾選 HR 推薦
+    let h = c['初選者'] ? '<p class="sub">初選：' + esc(c['初選者']) + ' 同意約面試</p>' : '';
+    h += '<div class="team"><div><b>主面試官</b>' + (c['主面試官'] ? esc(c['主面試官']) : '<span class="sub">還沒有人認領</span>') + '</div>' +
+      '<div><b>陪同</b>' + (esc([c['陪同面試官'], c['其他陪同']].filter(Boolean).join('、')) || '<span class="sub">無</span>') + '</div>' +
+      '<div><b>面試計畫</b>' + (chosen.length ? esc(projectNames(c))
+        : rec.length ? '<span class="sub">未選（HR 推薦：' + esc(rec.map(projectName).join('、')) + '）</span>' : '<span class="sub">未選</span>') + '</div></div>';
+
+    if (s === 'scheduled') {
+      h += '<p>面試時間：' + esc(c['面試日期']) + ' ' + esc(c['面試時間']) + (c['面試地點'] ? '，' + esc(c['面試地點']) : '') + '</p>';
+    } else if (s === 'to_schedule') {
+      h += '<p>面試官與計畫都安排好了，等待 HR 排定時間。</p>';
+    } else if (!c['主面試官']) {
+      h += '<p>第一位按「我要主面」的人就是主面試官，之後按的人一起陪同。</p>';
+    } else {
+      h += '<p>請主面試官選擇面試計畫，選好後 HR 才能排時間。</p>';
+    }
+
+    const btns = [];
+    if (canInterview()) {
+      if (!role) btns.push(c['主面試官'] ? act('我要陪同', 'join', 'c-assign', IC.hand, '跟 ' + c['主面試官'] + ' 一起面試') : act('我要主面', 'join', 'c-assign', IC.hand, '由你帶隊面試'));
+      if (s === 'scheduled' && canDecide(c)) btns.push(act('面試完成', 'finish', 'c-await_result', IC.check, '已面試＋評語＋結果一次填'));
+      if (s === 'scheduled' && role === 'member') btns.push(act('填寫評語', 'review', 'c-await_result', IC.pen, '陪同只填評語'));
+    }
+    if (btns.length) h += '<div class="decide">' + btns.join('') + '</div>';
+    if (c['主面試官']) {
+      const canLoc = role === 'lead' || isBoss();
+      h += '<div class="loc-row"><b>面試地點</b>' + (canLoc
+        ? '<select id="pLoc">' + opts('辦公地點', c['面試地點'], '請選擇') + '</select><span class="sub">由主面試官決定，HR 依此排時間' +
+          (c['面試日期'] ? '；已排定，改地點會通知面試官與行政' : '') + '</span>'
+        : (c['面試地點'] ? esc(c['面試地點']) : '<span class="warn-t">主面試官尚未選擇</span>')) + '</div>';
+    }
+    if (s !== 'scheduled' && c['主面試官']) {
+      h += '<div class="av-sec"><h4>可面試時間' + (role ? '<span class="sub">（請勾選你方便的時段，HR 會依大家都方便的時間約應徵者）</span>' : '') + '</h4><div id="availBox"></div></div>';
+    }
+
+    if (role === 'lead' || isBoss()) {
+      h += '<div id="planBox" class="plan-box">' + projectPickerHtml(picked, (role === 'lead' ? '你是主面試官，請選擇' : '所長可代為調整') + (!chosen.length && rec.length ? '；已預先勾選 HR 推薦' : '')) +
+        '<label class="others">其他陪同（名單外的人，直接寫名字）<input id="pOthers" value="' + esc(c['其他陪同']) + '" placeholder="例如：鎧佑"></label>' +
+        '<div class="row-btns">' + (isBoss() ? '<button class="btn left" data-act="assign">調整面試官</button>' : '') +
+        '<button class="btn primary" data-act="plan">儲存計畫與陪同</button></div></div>';
+    } else if (isBoss()) {
+      h += '<div class="row-btns"><button class="btn" data-act="assign">調整面試官</button></div>';
+    }
+    if (role) h += '<div class="row-btns"><button class="btn small" data-act="leave">退出這場面試</button></div>';
+    return h;
+  }
+
+  async function handleAct(btn, c) {
+    const id = c['應徵者ID'], key = btn.dataset.act, name = c['姓名'];
+    const run = async (fn, okMsg) => {
+      btn.disabled = true;
+      try { await fn(); App.editing = false; toast(okMsg); await reloadAll(); }
+      catch (e) { toast(errMsg(e), true); }
+      finally { btn.disabled = false; }
+    };
+
+    if (key === 'screen-yes') return run(() => api('setScreening', id, '約面試'), '已約面試，接著由面試官認領');
+    if (key === 'screen-no') {
+      const a = await confirmDialog({ title: '不約「' + name + '」面試？', message: '會直接結案，不寄感謝函，也不會通知 HR。', okText: '不約面試', danger: true });
+      if (a.ok) run(() => api('setScreening', id, '不約面試'), '已結案：不約面試');
+      return;
+    }
+    if (key === 'join' || key === 'leave') return doJoinLeave(btn, c, key);
+    if (key === 'plan') {
+      const proj = pickedProjects($('#planBox'));
+      if (!proj.length) { toast('請至少選一個面試計畫', true); return; }
+      return run(() => api('setInterviewPlan', id, proj, $('#pOthers').value), '已儲存面試計畫');
+    }
+    if (key === 'assign') return openAssignModal(c);
+    if (key === 'finish') return openFinishForm(c, '');
+    if (key === 'review') return openReviewForm(c);
+    if (key.indexOf('res-') === 0) return openFinishForm(c, key.slice(4));
+  }
+
+  function pickReview(r) {
+    const o = {};
+    ['現場表現', '建議團隊', '辦公地點', '備註'].forEach(k => { o[k] = r[k] || ''; });
+    return o;
+  }
+
+  function selectField(label, optKey, value) {
+    return '<label>' + esc(label) + '<select name="' + label + '">' + opts(optKey, value, '') + '</select></label>';
+  }
+
+  /* 面試完成：已面試＋評語＋結果一次送出（主面試官、所長） */
+  function openFinishForm(c, preset) {
+    const mine = myReview(), cur = c['結果'];
+    let result = preset || cur || '';
+    App.editing = true;
+    const choice = (k, label, hint, color, icon) => '<button type="button" class="act ' + color + (result === k ? ' on' : '') + '" data-r="' + k + '">' + icon + label + '<small>' + hint + '</small></button>';
+    openModal('<h2>面試完成：' + esc(c['姓名']) + '</h2>' +
+      '<p class="sub" style="margin:-6px 0 12px">送出後會標記為已面試，評語會存成你的面試評語。</p>' +
+      '<div class="decide" id="rChoice">' +
+        choice('錄取', '錄取', '回傳 HR 確認報到', 'c-offer', IC.star) +
+        choice('評估中', '待評估', '先保留，不通知 HR', 'c-eval', IC.clock) +
+        choice('感謝函', '不錄取', '回傳 HR 寄感謝函', 'c-closed', IC.mail) + '</div>' +
+      '<p id="rErr" class="form-err" hidden>請先選擇面試結果</p>' +
+      '<form id="fRes" class="form" style="margin-top:12px">' +
+      selectField('現場表現', '現場表現', mine['現場表現']) +
+      selectField('建議團隊', '建議團隊', mine['建議團隊']) +
+      selectField('辦公地點', '辦公地點', mine['辦公地點']) +
+      '<label class="full">評語或備註<textarea name="備註" placeholder="專業能力、表達、適合的工作內容；錄取可寫希望的報到時間">' + esc(mine['備註']) + '</textarea></label></form>' +
+      '<div class="row-btns"><button class="btn" id="rCancel">取消</button><button class="btn primary" id="rOk">送出</button></div>', 'narrow');
+    App.onModalClose = () => { App.editing = false; };
+    $('#rChoice').querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
+      result = b.dataset.r; $('#rErr').hidden = true;
+      $('#rChoice').querySelectorAll('[data-r]').forEach(x => x.classList.toggle('on', x === b));
+    });
+    $('#rCancel').onclick = closeModal;
+    $('#rOk').onclick = async e => {
+      if (!result) { $('#rErr').hidden = false; return; }
+      const data = formData($('#fRes'));
+      const r = await withBusy(e.target, () => api('submitInterview', c['應徵者ID'], result, data));
+      if (r) {
+        App.onModalClose = null; App.editing = false; closeModal();
+        toast(result === '錄取' ? '已錄取，已回傳 HR 確認報到' : result === '評估中' ? '已設為待評估（不通知 HR）' : '不錄取，已回傳 HR 寄感謝函');
+        await reloadAll();
+      }
+    };
+  }
+
+  /* 所長指定或調整面試官 */
+  function openAssignModal(c) {
+    const list = String(c['面試官名單'] || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+    const lead = list[0] || '', mates = list.slice(1);
+    const staff = App.staff || [];
+    App.editing = true;
+    openModal('<h2>調整面試官：' + esc(c['姓名']) + '</h2>' +
+      '<form id="fAsg" class="form">' +
+      '<label class="full">主面試官<select name="lead"><option value="">（無）</option>' +
+        staff.map(u => '<option value="' + esc(u.email) + '"' + (u.email === lead ? ' selected' : '') + '>' + esc(u.name + '（' + u.role + '）') + '</option>').join('') + '</select></label>' +
+      '<div class="full"><div class="pp-head">陪同面試官</div><div class="pp-items">' +
+        staff.map(u => '<label class="pp-chip' + (mates.indexOf(u.email) >= 0 ? ' on' : '') + '"><input type="checkbox" name="mate" value="' + esc(u.email) + '"' +
+          (mates.indexOf(u.email) >= 0 ? ' checked' : '') + '>' + esc(u.name) + '</label>').join('') + '</div></div>' +
+      '<label class="full">其他陪同（名單外，直接寫名字）<input name="others" value="' + esc(c['其他陪同']) + '"></label>' +
+      '<div class="full">' + projectPickerHtml(projectIdsOf(c).length ? projectIdsOf(c) : recIdsOf(c), projectIdsOf(c).length ? '' : (recIdsOf(c).length ? '已預先勾選 HR 推薦' : '')) + '</div></form>' +
+      '<div class="row-btns"><button class="btn" id="aCancel">取消</button><button class="btn primary" id="aOk">儲存</button></div>');
+    App.onModalClose = () => { App.editing = false; };
+    bindProjectPicker($('#fAsg'));
+    $('#fAsg').querySelectorAll('input[name="mate"]').forEach(cb => cb.addEventListener('change', () => cb.closest('.pp-chip').classList.toggle('on', cb.checked)));
+    $('#aCancel').onclick = closeModal;
+    $('#aOk').onclick = async e => {
+      const f = $('#fAsg');
+      const leadV = f.elements['lead'].value;
+      const matesV = Array.from(f.querySelectorAll('input[name="mate"]:checked')).map(x => x.value).filter(v => v !== leadV);
+      if (!leadV && matesV.length) { toast('有陪同時請先選主面試官', true); return; }
+      const r = await withBusy(e.target, () => api('assignPanel', c['應徵者ID'], leadV, matesV, f.elements['others'].value, pickedProjects(f)));
+      if (r) { App.onModalClose = null; App.editing = false; closeModal(); toast('已更新面試官'); await reloadAll(); }
+    };
+  }
+
+  /* 每位面試官各自的評語（陪同只填這個） */
+  function openReviewForm(c) {
+    const mine = myReview();
+    App.editing = true;
+    openModal('<h2>我的評語：' + esc(c['姓名']) + '</h2>' +
+      '<form id="fRev" class="form">' +
+      selectField('現場表現', '現場表現', mine['現場表現']) +
+      selectField('建議結果', '建議結果', mine['建議結果']) +
+      selectField('建議團隊', '建議團隊', mine['建議團隊']) +
+      selectField('辦公地點', '辦公地點', mine['辦公地點']) +
+      '<label class="full">評語<textarea name="備註" placeholder="專業能力、表達、適合的工作內容等">' + esc(mine['備註']) + '</textarea></label></form>' +
+      '<div class="row-btns"><button class="btn" id="vCancel">取消</button><button class="btn primary" id="vOk">儲存評語</button></div>', 'narrow');
+    App.onModalClose = () => { App.editing = false; };
+    $('#vCancel').onclick = closeModal;
+    $('#vOk').onclick = async e => {
+      const r = await withBusy(e.target, () => api('addReview', c['應徵者ID'], formData($('#fRev'))));
+      if (r) { App.onModalClose = null; App.editing = false; closeModal(); toast('已儲存評語'); await reloadAll(); }
+    };
+  }
+  </script>
+</body>
+</html>

@@ -1,0 +1,554 @@
+<style>
+  /* HR 排面試：計畫勾選與應徵者連結 */
+  .proj-pick { border: 1px solid var(--line); border-radius: var(--r-md); padding: 8px 10px; background: #fff; }
+  .proj-pick .pp-head { font-weight: 700; margin-bottom: 4px; }
+  .proj-pick .pp-head .sub { font-weight: 400; margin-left: 4px; }
+  .pp-item { display: flex; gap: 8px; align-items: flex-start; padding: 5px 6px; border-radius: var(--r-sm); cursor: pointer; font-weight: 400; }
+  .pp-item:hover { background: #f4f7fa; }
+  .pp-item.on { background: #eaf2fb; }
+  .form .pp-item { flex-direction: row; color: var(--text); font-size: 14px; }
+  .form .pp-item input { margin-top: 5px; width: auto; flex: none; padding: 0; }
+  .pp-item small { display: block; color: var(--muted); font-size: 12px; }
+  .pp-group { display: flex; gap: 10px; align-items: flex-start; padding: 5px 0; border-top: 1px solid #edf0f3; }
+  .pp-group:first-of-type { border-top: 0; }
+  .pp-gname { width: 6.5em; flex: none; font-size: 13px; font-weight: 700; color: var(--ink); padding-top: 4px; }
+  .pp-items { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pp-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
+    cursor: pointer; font-size: 14px; background: #fff; color: var(--text); }
+  .form .pp-chip { flex-direction: row; font-size: 14px; color: var(--text); }
+  .pp-chip.on { background: #eaf2fb; border-color: var(--ink); color: var(--ink); font-weight: 700; }
+  .pp-chip input { width: auto; margin: 0; padding: 0; }
+  .pp-chip small { font-size: 11px; color: var(--muted); font-weight: 400; }
+  /* 面試官可面試時間 */
+  .av-wrap { overflow-x: auto; margin: 6px 0; }
+  .av { border-collapse: collapse; font-size: 13px; min-width: 520px; }
+  .av th.time { text-align: right; padding: 2px 8px; font-variant-numeric: tabular-nums; }
+  .av th.time.click { cursor: pointer; text-decoration: underline dotted; }
+  .av th.day { text-align: center; line-height: 1.25; }
+  .av.editing { user-select: none; -webkit-user-select: none; touch-action: none; }
+  .av-q { display: flex; gap: 2px; justify-content: center; margin-top: 3px; }
+  .av-q button { border: 1px solid var(--line); background: #fff; border-radius: 4px; font-size: 11px; padding: 0 4px; line-height: 18px; cursor: pointer; color: var(--ink); }
+  .av-q button:hover { background: #e3eefb; }
+  .av th, .av td { border: 1px solid var(--line); padding: 0; text-align: center; }
+  .av th { background: #f4f6f8; font-weight: 400; padding: 4px 6px; color: var(--muted); white-space: nowrap; }
+  .av th.day { color: var(--text); }
+  .av th.day.click { cursor: pointer; text-decoration: underline dotted; }
+  .av td button { width: 100%; min-width: 46px; height: 24px; border: 0; background: #fff; cursor: pointer; font-size: 12px; color: var(--muted); }
+  .av td button:disabled { cursor: default; }
+  .av td.some button { background: #fff6dc; color: #7a5300; }
+  .av td.all button { background: #dff3e5; color: #1f6b3a; font-weight: 700; }
+  .av td.mine button { box-shadow: inset 0 0 0 2px #2463a6; background: #e3eefb; color: #174a85; font-weight: 700; }
+  .av td.pick button { cursor: pointer; }
+  .av-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin: 4px 0; }
+  .av-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
+  .av-members { font-size: 13px; margin: 6px 0; }
+  .av-members span { display: inline-block; margin-right: 10px; }
+  .av-members .no { color: #b3261e; }
+  .av-common { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .av-common button { border: 1px solid #1f6b3a; background: #dff3e5; color: #1f6b3a; border-radius: 999px; padding: 3px 10px; cursor: pointer; font-size: 13px; }
+  .link-row { display: flex; gap: 10px; align-items: flex-end; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #edf0f3; flex-wrap: wrap; }
+  .link-row > div:first-child { flex: 1; min-width: 220px; }
+  .link-box { width: 100%; margin-top: 4px; font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 6px; background: #f7f9fb; }
+  .link-btns { display: flex; gap: 6px; }
+  .section h3 .btn + .btn { margin-left: 0; }
+  .memo-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
+  .memo-tabs button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 14px; }
+  .memo-tabs button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .memo { font-size: 14.5px; }
+  .memo .m-note { background: var(--warn-bg); color: var(--warn); padding: 6px 10px; border-radius: 4px; font-size: 13px; margin: 0 0 10px; }
+  .memo .m-title { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
+  .memo .m-meta { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .memo .m-cand { display: grid; grid-template-columns: 7em 1fr 7em 1fr; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; margin: 0 0 6px; }
+  .memo .m-cand div { padding: 5px 8px; border-bottom: 1px solid #edf0f3; }
+  .memo .m-cand .k { background: #eef4fa; font-weight: 700; }
+  .memo h4 { font-size: 15px; color: var(--ink); border-bottom: 2px solid var(--ink); padding-bottom: 2px; margin: 18px 0 8px; }
+  .memo table { width: 100%; border-collapse: collapse; }
+  .memo td, .memo th { border: 1px solid var(--line); padding: 5px 8px; vertical-align: top; text-align: left; }
+  .memo th { background: var(--ink); color: #fff; }
+  .memo td.k { background: #eef4fa; font-weight: 700; width: 11em; }
+  .memo ul { margin: 0; padding-left: 1.2em; }
+  .memo .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .memo .two b { display: block; margin-bottom: 2px; }
+  .memo .mq { margin: 0 0 12px; }
+  .memo .mq .qt { font-weight: 700; }
+  .memo .mq .tg { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .memo .mq .rb { color: var(--ink); font-size: 13px; margin-top: 2px; }
+  .memo .m-hint { background: #eef4fa; border-left: 4px solid var(--ink); padding: 8px 12px; border-radius: 4px; margin: 10px 0 0; }
+  .memo .task { margin: 0 0 10px; }
+  .memo .eg { color: var(--muted); font-size: 13px; margin-left: 1.2em; }
+  .memo .m-ok { background: #e8f5ec; color: #23613b; padding: 6px 10px; border-radius: 4px; font-size: 13px; margin: 0 0 10px; }
+  @media (max-width: 640px) { .memo .two, .memo .m-cand { grid-template-columns: 1fr; } }
+</style>
+<script>
+/* =====================================================================
+ * 面試計畫：清單載入與分組勾選（HR 頁與主管頁共用）
+ * ===================================================================== */
+App.projectList = null;
+async function loadProjectList(onDone) {
+  try { App.projectList = await api('getProjectList'); }
+  catch (e) { App.projectList = { projects: [], map: [], error: errMsg(e) }; }
+  if (onDone) onDone();
+}
+
+function projectIdsOf(c) {
+  return String(c['面試計畫'] || '').split(/[、,，;；\s]+/).filter(Boolean);
+}
+
+/** HR 推薦的計畫 */
+function recIdsOf(c) {
+  return String(c['推薦計畫'] || '').split(/[、,，;；\s]+/).filter(Boolean);
+}
+
+function projectName(id) {
+  const p = ((App.projectList || {}).projects || []).find(x => x.id === id);
+  return p ? p.name : String(id).replace(/^[^_]*_/, '');
+}
+
+/** 已選計畫的顯示文字，例如「主計發展、人事系統」 */
+function projectNames(c) { return projectIdsOf(c).map(projectName).join('、'); }
+
+/** 依組別分組的計畫勾選 */
+function projectPickerHtml(picked, note) {
+  const pl = App.projectList;
+  if (!pl) return '<p class="sub">正在讀取計畫清單…</p>';
+  if (pl.error) return '<p class="sub">計畫清單讀取失敗：' + esc(pl.error) + '</p>';
+  if (!pl.projects.length) return '<p class="sub">還沒有啟用中的計畫，請管理員到試算表「計畫清單」設定。</p>';
+  const groups = [];
+  pl.projects.forEach(p => {
+    let g = groups.find(x => x.name === p.group);
+    if (!g) groups.push(g = { name: p.group, items: [] });
+    g.items.push(p);
+  });
+  return '<div class="proj-pick"><div class="pp-head">面試計畫' + (note ? '<span class="sub">（' + esc(note) + '）</span>' : '') + '</div>' +
+    groups.map(g => '<div class="pp-group"><div class="pp-gname">' + esc(g.name) + '</div><div class="pp-items">' +
+      g.items.map(p => '<label class="pp-chip' + (picked.indexOf(p.id) >= 0 ? ' on' : '') + '" title="' + esc(p.title) + '">' +
+        '<input type="checkbox" name="proj" value="' + esc(p.id) + '"' + (picked.indexOf(p.id) >= 0 ? ' checked' : '') + '>' +
+        esc(p.name) + (p.empty ? '<small>內容準備中</small>' : '') + '</label>').join('') + '</div></div>').join('') + '</div>';
+}
+
+function bindProjectPicker(root) {
+  (root || document).querySelectorAll('.pp-chip input').forEach(cb =>
+    cb.addEventListener('change', () => cb.closest('.pp-chip').classList.toggle('on', cb.checked)));
+}
+
+function pickedProjects(root) {
+  // 只取計畫的勾選框（name="proj"），不要把同一個表單裡陪同面試官的勾選框也算進去
+  return Array.from((root || document).querySelectorAll('.pp-chip input[name="proj"]:checked')).map(x => x.value);
+}
+
+/* =====================================================================
+ * 面試官可面試時間（主管頁：面試官勾選；HR 頁：看共同時段並帶入排時間）
+ * mode：'edit' 我在名單上可以勾；'hr' HR 檢視、點共同時段帶入；'view' 只看
+ * ===================================================================== */
+async function mountAvail(box, id, mode, onPick) {
+  if (!box) return;
+  box.innerHTML = '<div class="loading">讀取面試官時間…</div>';
+  let av;
+  try { av = await api('getAvailability', id); }
+  catch (e) { box.innerHTML = '<p class="sub">面試官時間讀取失敗：' + esc(errMsg(e)) + '</p>'; return; }
+  if (!box.isConnected) return;   // 讀取期間畫面已重畫，交給新的區塊處理
+  const meKey = (App.me && App.me.key) || '';
+  const mineRow = av.members.find(m => m.key === meKey);
+  const mine = new Set(mineRow ? mineRow.slots : []);
+  const draw = () => {
+    const total = av.members.length;
+    const filled = av.members.filter(m => m.filled);
+    const others = av.members.filter(m => m.key !== meKey && m.filled);
+    const who = slot => filled.filter(m => (m.key === meKey && mode === 'edit' ? mine.has(slot) : m.slots.indexOf(slot) >= 0)).map(m => m.name);
+    const common = [];
+    // 直向排列：每列一個時段、每欄一天（時段多，直向比較好看）
+    let h = '<div class="av-wrap"><table class="av' + (mode === 'edit' ? ' editing' : '') + '"><tr><th></th>' + av.days.map(d =>
+      '<th class="day" data-day="' + d.date + '">' + esc(d.label.slice(0, 5)) + '<br>' + esc(d.label.slice(5)) +
+      (mode === 'edit' ? '<div class="av-q"><button type="button" data-q="am" data-day="' + d.date + '" title="這天上午 09:00–11:30">上</button>' +
+        '<button type="button" data-q="pm" data-day="' + d.date + '" title="這天下午 13:30–17:00">下</button>' +
+        '<button type="button" data-q="all" data-day="' + d.date + '" title="這天整天">全</button></div>' : '') + '</th>').join('') + '</tr>';
+    av.times.forEach(t => {
+      h += '<tr><th class="time' + (mode === 'edit' ? ' click' : '') + '" data-time="' + t + '"' + (mode === 'edit' ? ' title="點時間可把每一天的這個時段一起勾選或取消"' : '') + '>' + esc(t) + '</th>';
+      av.days.forEach(d => {
+        const slot = d.date + ' ' + t;
+        const names = who(slot);
+        const isMine = mode === 'edit' && mine.has(slot);
+        const allOk = total > 0 && filled.length === total && names.length === total;
+        if (allOk) common.push(slot);
+        let cls = allOk ? 'all' : names.length ? 'some' : '';
+        let label = '';
+        if (mode === 'edit') {
+          const o = others.filter(m => m.slots.indexOf(slot) >= 0).length;
+          if (isMine) cls = 'mine';
+          label = (isMine ? '✓' : '') + (o ? (isMine ? ' ' : '') + '+' + o : '');
+        } else {
+          label = names.length ? names.length + '/' + total : '';
+          if (mode === 'hr' && allOk) cls += ' pick';
+        }
+        h += '<td class="' + cls + '"><button type="button" data-slot="' + slot + '" title="' + esc(d.label + ' ' + t + '：' + (names.join('、') || '沒有人勾')) + '"' +
+          (mode === 'view' || (mode === 'hr' && !allOk) ? ' disabled' : '') + '>' + esc(label) + '</button></td>';
+      });
+      h += '</tr>';
+    });
+    common.sort();
+    h += '</table></div>';
+    h += '<div class="av-legend">' + (mode === 'edit'
+      ? '<span><i style="background:#e3eefb;border-color:#2463a6"></i>我方便</span><span>+N：其他面試官也方便的人數</span>'
+      : '') + '<span><i style="background:#dff3e5"></i>大家都方便</span><span><i style="background:#fff6dc"></i>部分人方便</span></div>';
+    h += '<div class="av-members">' + (av.members.length ? av.members.map(m =>
+      '<span class="' + (m.filled ? '' : 'no') + '">' + esc(m.name) + (m.lead ? '（主）' : '') + '：' +
+        (m.filled ? (m.slots.length ? m.slots.length + ' 個時段' : '都不方便') + (m.updated ? '，' + esc(m.updated) : '') : '尚未填寫') + '</span>').join('')
+      : '<span class="sub">還沒有面試官認領。</span>') +
+      (av.others ? '<span class="sub">名單外的「' + esc(av.others) + '」請另外確認時間</span>' : '') + '</div>';
+    if (mode === 'hr') {
+      h += filled.length < total ? '<p class="sub">還有面試官沒填時間，共同時段可能還會變。</p>' : '';
+      h += common.length ? '<div class="sub">大家都方便的時段（點一下帶入下方表單）：</div><div class="av-common">' +
+        common.map(x => '<button type="button" data-slot="' + x + '">' + esc(x.slice(5).replace('-', '/')) + '</button>').join('') + '</div>'
+        : (total && filled.length === total ? '<p class="sub">目前沒有大家都方便的時段，請和面試官另外協調。</p>' : '');
+    }
+    if (mode === 'edit') h += '<div class="row-btns"><span class="sub left">按住滑鼠拖過格子可一次勾選或取消；日期下的「上／下／全」勾上午、下午、整天；點左側時間勾每天同一時段</span><button type="button" class="btn primary" id="avSave">儲存我的時間</button></div>';
+    box.innerHTML = h;
+
+    if (mode === 'edit') {
+      // 拖曳選取：從第一格的狀態決定這次是「勾選」還是「取消」，拖過的格子都照做
+      let drag = null;
+      const endDrag = () => { if (drag) { drag = null; draw(); } };
+      const paint = btn => {
+        const sl = btn.dataset.slot;
+        if (drag.add) mine.add(sl); else mine.delete(sl);
+        btn.parentElement.className = drag.add ? 'mine' : '';
+        btn.textContent = drag.add ? '✓' : '';
+      };
+      box.querySelectorAll('td button').forEach(b => {
+        b.addEventListener('pointerdown', e => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          drag = { add: !mine.has(b.dataset.slot) };
+          paint(b); App.editing = true;
+          document.addEventListener('pointerup', endDrag, { once: true });
+        });
+        b.addEventListener('click', e => {   // 鍵盤（Enter／空白鍵）操作
+          if (e.detail !== 0) return;
+          const sl = b.dataset.slot; mine.has(sl) ? mine.delete(sl) : mine.add(sl); App.editing = true; draw();
+        });
+      });
+      const table = box.querySelector('table.av');
+      table.addEventListener('pointermove', e => {
+        if (!drag) return;
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const btn = el && el.closest ? el.closest('td button[data-slot]') : null;
+        if (btn && table.contains(btn)) paint(btn);
+      });
+      table.addEventListener('pointerleave', e => { if (drag && !(e.buttons & 1)) endDrag(); });
+      // 上午／下午／整天
+      box.querySelectorAll('[data-q]').forEach(q => q.onclick = () => {
+        const ts = av.times.filter(t => q.dataset.q === 'all' || (q.dataset.q === 'am' ? t < '12:00' : t >= '13:30'));
+        const slots = ts.map(t => q.dataset.day + ' ' + t);
+        const allOn = slots.every(x => mine.has(x));
+        slots.forEach(x => allOn ? mine.delete(x) : mine.add(x)); App.editing = true; draw();
+      });
+      box.querySelectorAll('th.time').forEach(th => th.onclick = () => {
+        const slots = av.days.map(d => d.date + ' ' + th.dataset.time);
+        const allOn = slots.every(x => mine.has(x));
+        slots.forEach(x => allOn ? mine.delete(x) : mine.add(x)); App.editing = true; draw();
+      });
+      box.querySelector('#avSave').onclick = async e => {
+        const r = await withBusy(e.target, () => api('setAvailability', id, Array.from(mine)));
+        if (r) { av = r; App.editing = false; toast('已儲存你的面試時間'); if (box.isConnected) draw(); }
+      };
+    }
+    if (mode === 'hr' && onPick) {
+      box.querySelectorAll('td.pick button, .av-common button').forEach(b => b.onclick = () => onPick(b.dataset.slot));
+    }
+  };
+  draw();
+}
+</script>
+<script>
+/* =====================================================================
+ * 面試官資料（內部，原 6～10）與 面試者資料（給應徵者，面試者版＋原 1～5）
+ * 兩份都可以在頁面上看、下載 Word、在新分頁開啟列印
+ * ===================================================================== */
+const DOC_KIND = {
+  iv: { api: 'getInterviewMemo', title: '面試官資料', file: '面試官資料' },
+  cd: { api: 'getCandidateBrief', title: '面試者資料', file: '面試者資料' }
+};
+
+async function openInterviewMemo(id, name) { return openDocModal('iv', id, name); }
+async function openCandidateBrief(id, name) { return openDocModal('cd', id, name); }
+
+async function openDocModal(kind, id, name) {
+  const K = DOC_KIND[kind];
+  const title = '<h2>' + esc(name) + ' 的' + K.title + '</h2>';
+  openModal(title + '<div class="loading">讀取中…</div>', 'wide');
+  let d;
+  try { d = await api(K.api, id); }
+  catch (e) {
+    $('#modalCard').innerHTML = title + '<p>' + esc(errMsg(e)) + '</p><div class="row-btns"><button class="btn primary" onclick="closeModal()">關閉</button></div>';
+    return;
+  }
+  let cur = 0;
+  const draw = () => {
+    const p = d.projects[cur];
+    $('#modalCard').innerHTML = title +
+      (d.projects.length > 1 ? '<div class="memo-tabs">' + d.projects.map((x, i) =>
+        '<button data-i="' + i + '" class="' + (i === cur ? 'on' : '') + '">' + esc(x.name || (x.code + ' ' + x.slug)) + '</button>').join('') + '</div>' : '') +
+      '<div class="memo">' + (kind === 'iv' ? memoHtml(p, d.candidate) : briefHtml(p, d.candidate)) + '</div>' +
+      '<div class="row-btns"><button class="btn left" id="mmWord">下載 Word</button>' +
+      (kind === 'cd' && p.url ? '<button class="btn" id="mmCopy">複製應徵者連結</button>' : '') +
+      '<button class="btn" id="mmPrint">在新分頁開啟（可列印）</button>' +
+      '<button class="btn primary" onclick="closeModal()">關閉</button></div>';
+    $('#modalCard').querySelectorAll('.memo-tabs button').forEach(b => b.onclick = () => { cur = +b.dataset.i; draw(); });
+    $('#mmWord').onclick = e => withBusy(e.target, () => downloadDocWord(kind, p, d.candidate, d.viewer));
+    $('#mmPrint').onclick = () => openDocPrint(kind, p, d.candidate);
+    if ($('#mmCopy')) $('#mmCopy').onclick = e => copyLink(p.url, e.target);
+  };
+  draw();
+}
+
+async function copyLink(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) {
+    const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t);
+    t.select(); try { document.execCommand('copy'); } catch (e2) { /* 仍可手動複製 */ } t.remove();
+  }
+  if (btn) { const l = btn.textContent; btn.textContent = '已複製'; setTimeout(() => { btn.textContent = l; }, 1500); }
+  toast('已複製連結');
+}
+
+/* ===== 頁面上的版面 ===== */
+function memoList(arr) { return '<ul>' + (arr || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>'; }
+function memoTable(head, rows) {
+  return '<table>' + (head ? '<tr>' + head.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr>' : '') +
+    rows.map(r => '<tr>' + r.map((v, i) => '<td' + (!head && i === 0 ? ' class="k"' : '') + '>' + esc(v) + '</td>').join('') + '</tr>').join('') + '</table>';
+}
+function headInfo(kind, c, viewer) {
+  const when = [c['面試日期'], c['面試時間']].filter(Boolean).join(' ');
+  return kind === 'iv'
+    ? [['面試官', c['面試官組合'] || viewer], ['應徵者', c['姓名']], ['應徵職缺', c['應徵職缺']], ['面試時間', when], ['面試地點', c['面試地點']],
+       ['最高學歷', [c['最高學歷'], c['最高學歷學校科系']].filter(Boolean).join('／')]].filter(x => x[1])
+    : [['應徵者', c['姓名']], ['應徵職缺', c['應徵職缺']], ['面試時間', when], ['面試地點', c['面試地點']]].filter(x => x[1]);
+}
+function headInfoHtml(rows) {
+  return '<div class="m-cand">' + rows.map(x => '<div class="k">' + esc(x[0]) + '</div><div>' + esc(x[1]) + '</div>').join('') + '</div>';
+}
+
+function memoHtml(p, c, viewer) {
+  const s = p.interviewer_short || {};
+  let h = '<p class="m-note">內部使用，請勿轉給應徵者。給應徵者的精簡說明請用「面試者資料」。</p>' +
+    '<p class="m-title">' + esc(p.title) + '</p><p class="m-meta">委託機關：' + esc(p.client) + '　｜　計畫年度：' + esc(p.year) + '</p>' +
+    headInfoHtml(headInfo('iv', c, viewer || (App.me && App.me.name)));
+  if (c['工作經歷']) h += '<p class="sub" style="white-space:pre-wrap;margin:6px 0 0">工作經歷：' + esc(c['工作經歷']) + '</p>';
+  if (p.empty) return h + '<p class="m-note" style="margin-top:12px">「' + esc(p.name) + '」的內容準備中，請洽計畫 PM 或管理員。</p>';
+  if (s.overview) h += '<h4>1. 計畫概要</h4><p>' + esc(s.overview) + '</p>';
+  if ((s.stakeholders || []).length) h += '<h4>2. 委託機關與利害關係人</h4>' + memoTable(['對象', '角色／關係'], s.stakeholders.map(x => [x.who, x.role]));
+  if ((s.work_items || []).length) h += '<h4>3. 主要工作項目</h4>' + memoTable(null, s.work_items.map(x => [x.item, x.summary]));
+  if ((s.future || []).length) h += '<h4>4. 未來預計工作（推估，以新年度契約為準）</h4>' + memoTable(['工作', '推估依據'], s.future.map(x => [x.item, x.basis]));
+  if ((s.daily_work || []).length) h += '<h4>5. 新人日常會做的事</h4>' + memoList(s.daily_work);
+  if ((s.key_terms || []).length) h += '<h4>6. 面試前要先懂的名詞</h4>' + memoTable(['名詞', '說明'], s.key_terms.map(x => [x.term, x.explain]));
+  if ((s.competencies || []).length) h += '<h4>7. 要評估的能力與問法</h4>' + memoTable(['能力', '怎麼問出來'], s.competencies.map(x => [x.competency, x.probe]));
+  h += '<h4>8. 聽答案的訊號</h4><div class="two"><div><b>加分訊號（有料）</b>' + memoList(s.green_flags) +
+    '</div><div><b>警訊（需要追問）</b>' + memoList(s.red_flags) + '</div></div>';
+  if ((s.questions || []).length) {
+    h += '<h4>9. 建議題目</h4>' + s.questions.map((q, i) => '<div class="mq"><div><span class="qt">Q' + (i + 1) + '. ' + esc(q.question) + '</span>' +
+      '<span class="tg">' + esc([q.type, q.level].filter(Boolean).join('｜')) + '</span></div>' + memoList(q.answer_points) +
+      (q.rubric ? '<div class="rb">評分觀察：' + esc(q.rubric) + '</div>' : '') + '</div>').join('');
+  }
+  if ((s.caveats || []).length) h += '<h4>10. 資料注意事項</h4>' + memoList(s.caveats);
+  return h;
+}
+
+/**
+ * 面試者資料的章節（頁面與 Word 共用）：只講重點，控制在 A4 1～2 頁
+ * 工作只列名稱與一句說明，不列例子；背景細節、年度節奏、合作對象留給面試時再談
+ */
+function briefSections(p) {
+  const c = p.candidate || {}, out = [];
+  out.push({ t: '這個計畫在做什麼', type: 'intro', intro: c.project_intro, why: c.why_it_matters });
+  if ((c.main_tasks || []).length) out.push({ t: '你會負責的工作', type: 'tasks', v: c.main_tasks });
+  out.push({ t: '我們在找這樣的你', type: 'two', a: ['需要具備', c.skills_required], b: ['有的話更好', c.skills_plus] });
+  if ((c.work_style || []).length) out.push({ t: '工作型態', type: 'list', v: c.work_style });
+  return out;
+}
+const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四'];
+
+function briefHtml(p, c) {
+  const cd = p.candidate || {};
+  let h = '<p class="m-ok">這份是給應徵者看的精簡說明（A4 1～2 頁），可以直接轉給應徵者，或複製連結貼到 104。</p>' +
+    '<p class="m-title">' + esc(p.title) + '</p><p class="m-meta">委託機關：' + esc(p.client) + '　｜　計畫年度：' + esc(p.year) + '</p>' +
+    headInfoHtml(headInfo('cd', c));
+  if (p.empty) return h + '<p class="m-note" style="margin-top:12px">「' + esc(p.name) + '」的工作說明準備中。</p>';
+  if (cd.position_hint) h += '<p class="m-hint"><b>職務定位　</b>' + esc(cd.position_hint) + '</p>';
+  briefSections(p).forEach((s, i) => {
+    h += '<h4>' + CN_NUM[i] + '、' + esc(s.t) + '</h4>';
+    if (s.type === 'intro') h += '<p>' + esc(s.intro) + '</p>' + (s.why ? '<p><b>工作的意義：</b>' + esc(s.why) + '</p>' : '');
+    else if (s.type === 'text') h += '<p>' + esc(s.v) + '</p>';
+    else if (s.type === 'table') h += memoTable(s.head || null, s.rows);
+    else if (s.type === 'list') h += memoList(s.v);
+    else if (s.type === 'tasks') h += s.v.map((t, k) => '<div class="task"><b>' + (k + 1) + '. ' + esc(t.name) + '</b>　' + esc(t.description) + '</div>').join('');
+    else if (s.type === 'two') h += '<div class="two"><div><b>' + esc(s.a[0]) + '</b>' + memoList(s.a[1]) + '</div><div><b>' + esc(s.b[0]) + '</b>' + memoList(s.b[1]) + '</div></div>';
+    else if (s.type === 'qs') h += s.v.map((q, k) => '<p class="mq"><span class="qt">Q' + (k + 1) + '　</span>' + esc(q) + '</p>').join('');
+  });
+  h += '<p class="sub" style="margin-top:14px;font-style:italic">本說明依本院過往同類計畫整理，實際工作內容以當年度契約及主管安排為準。</p>';
+  return h;
+}
+
+/** 新分頁開啟乾淨的版面，方便列印或另存 PDF */
+function openDocPrint(kind, p, c) {
+  const css = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
+  const body = kind === 'iv' ? memoHtml(p, c) : briefHtml(p, c);
+  const html = '<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><title>' + esc(c['姓名'] + '｜' + DOC_KIND[kind].title + '｜' + p.title) +
+    '</title><style>' + css + ' body{background:#fff;padding:24px;max-width:900px;margin:0 auto} .m-ok{display:none} @media print{body{padding:0}}</style></head><body>' +
+    '<div class="memo">' + body + '</div></body></html>';
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/* ===== Word 匯出（docx 9.6.1，用到時才從 CDN 載入） ===== */
+const DOCX_CDN = 'https://cdn.jsdelivr.net/npm/docx@9.6.1/dist/index.iife.js';
+let docxLoading = null;
+function loadDocx() {
+  if (window.docx && window.docx.Document) return Promise.resolve(window.docx);
+  if (!docxLoading) {
+    docxLoading = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = DOCX_CDN;
+      s.onload = () => window.docx ? resolve(window.docx) : (docxLoading = null, reject(new Error('Word 元件載入失敗')));
+      s.onerror = () => { docxLoading = null; reject(new Error('Word 元件載入失敗，請檢查網路後再試')); };
+      document.head.appendChild(s);
+    });
+  }
+  return docxLoading;
+}
+
+async function downloadDocWord(kind, p, c, viewer) {
+  const D = await loadDocx();
+  const doc = kind === 'iv' ? buildMemoDoc(D, p, c, viewer) : buildBriefDoc(D, p, c);
+  const blob = await D.Packer.toBlob(doc);
+  const safe = s => String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = DOC_KIND[kind].file + '_' + safe(c['姓名']) + '_' + safe(p.name || (p.code + p.slug)) + '.docx';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 60000);
+}
+// 舊名稱相容
+function downloadMemoWord(p, c, viewer) { return downloadDocWord('iv', p, c, viewer); }
+
+/** 兩份 Word 共用的版面工具（沿用原「面試文件產生器」的樣式） */
+function docKit(D) {
+  const { Document, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType,
+    AlignmentType, BorderStyle, LevelFormat, Footer, PageNumber, HeadingLevel, TableLayoutType, LineRuleType } = D;
+  const K = { FONT: 'Microsoft JhengHei', ACCENT: '1F5C7A', LIGHT: 'E8F1F5', MUTED: '5A6B75', INK: '1A2A33',
+    ORG: '財團法人台灣水資源與農業研究院', A4: { width: 11906, height: 16838 } };
+  const L = v => Array.isArray(v) ? v : (v ? [v] : []);
+  const run = (t, o = {}) => new TextRun({ text: String(t == null ? '' : t), font: K.FONT, size: o.size || 19, bold: o.bold, color: o.color, italics: o.italics });
+  const para = (kids, o = {}) => {
+    if (!Array.isArray(kids)) kids = [run(kids, o)];
+    return new Paragraph({ children: kids, keepNext: o.keepNext, indent: o.indent, shading: o.shading, border: o.border,
+      spacing: { before: o.before || 0, after: o.after == null ? 50 : o.after, line: o.line || 276, lineRule: LineRuleType.EXACT },
+      numbering: o.bullet ? { reference: 'bullets', level: 0 } : undefined });
+  };
+  const bullet = (t, o = {}) => para([run(t, o)], Object.assign({}, o, { bullet: true, after: o.after == null ? 20 : o.after }));
+  const heading = (t, o = {}) => new Paragraph({ heading: HeadingLevel.HEADING_1, keepNext: true,
+    children: [run(t, { size: 22, bold: true, color: K.ACCENT })],
+    spacing: { before: o.before == null ? 140 : o.before, after: 60, line: 320, lineRule: LineRuleType.EXACT },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: K.ACCENT, space: 2 } } });
+  const cb = { style: BorderStyle.SINGLE, size: 4, color: 'C5D3DA' };
+  const borders = { top: cb, bottom: cb, left: cb, right: cb };
+  const cell = (v, w, o = {}) => {
+    const ps = L(v).map(x => x instanceof Paragraph ? x : para([run(x, { size: o.size || 18, bold: o.bold, color: o.color })], { after: 10, line: 264 }));
+    return new TableCell({ children: ps.length ? ps : [para('')], width: { size: w, type: WidthType.DXA }, borders,
+      shading: o.fill ? { type: ShadingType.CLEAR, color: 'auto', fill: o.fill } : undefined,
+      margins: { top: 40, bottom: 40, left: 80, right: 80 } });
+  };
+  const table = (widths, rows, o = {}) => new Table({
+    width: { size: widths.reduce((a, b) => a + b, 0), type: WidthType.DXA }, columnWidths: widths, layout: TableLayoutType.FIXED,
+    rows: rows.map((r, i) => new TableRow({ tableHeader: o.header && i === 0, cantSplit: true,
+      children: r.map((v, j) => cell(v, widths[j], {
+        fill: o.header && i === 0 ? K.ACCENT : (o.firstColFill && j === 0 ? K.LIGHT : undefined),
+        color: o.header && i === 0 ? 'FFFFFF' : undefined,
+        bold: (o.header && i === 0) || (o.firstColBold && j === 0) })) })) });
+  /** 抬頭：標籤、計畫名稱、委託機關、個人資訊表 */
+  const titleBlock = (label, p, info, W) => {
+    const rows = [];
+    for (let i = 0; i < info.length; i += 2) { const a = info[i], b = info[i + 1] || ['', '']; rows.push([a[0], a[1], b[0], b[1]]); }
+    const lw = 1250, vw = Math.round((W - lw * 2) / 2), iw = [lw, vw, lw, W - lw * 2 - vw];
+    return [
+      para([run('  ' + label + '  ', { size: 17, bold: true, color: 'FFFFFF' })], { shading: { type: ShadingType.CLEAR, color: 'auto', fill: K.ACCENT }, after: 60 }),
+      para([run(p.title, { size: 28, bold: true, color: K.INK })], { after: 30, line: 330 }),
+      para([run('委託機關：' + p.client + '　｜　計畫年度：' + p.year + '　｜　執行單位：' + K.ORG, { size: 16, color: K.MUTED })], { after: 90 }),
+      new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: iw, layout: TableLayoutType.FIXED,
+        rows: rows.map(r => new TableRow({ children: r.map((v, j) => cell(v, iw[j], { fill: j % 2 === 0 ? K.LIGHT : undefined, bold: j % 2 === 0 || j === 1, size: 19 })) })) }),
+      para('', { after: 60 })
+    ];
+  };
+  const doc = (title, footerText, margins, body) => new Document({
+    creator: K.ORG, title: title,
+    numbering: { config: [{ reference: 'bullets', levels: [{ level: 0, format: LevelFormat.BULLET, text: '•', alignment: AlignmentType.LEFT, style: { paragraph: { indent: { left: 340, hanging: 220 } } } }] }] },
+    styles: { default: { document: { run: { font: K.FONT, size: 19 } } } },
+    sections: [{ properties: { page: { size: K.A4, margin: margins } },
+      footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [
+        run(footerText + '　｜　第 ', { size: 15, color: K.MUTED }),
+        new TextRun({ children: [PageNumber.CURRENT], font: K.FONT, size: 15, color: K.MUTED }), run(' 頁', { size: 15, color: K.MUTED })] })] }) },
+      children: body }]
+  });
+  return { D, K, L, run, para, bullet, heading, table, titleBlock, doc, ShadingType, BorderStyle };
+}
+
+/** 面試官資料（完整 1～10：面試的人不一定是計畫負責人，需要較多背景） */
+function buildMemoDoc(D, p, c, viewer) {
+  const k = docKit(D), { K, L, run, para, bullet, heading, table } = k;
+  const W = K.A4.width - 2 * 950, half = W / 2;
+  const s = p.interviewer_short || {};
+  const body = k.titleBlock('面試官資料｜內部使用，請勿交給應徵者', p, headInfo('iv', c, viewer), W);
+  if (p.empty) { body.push(para('「' + p.name + '」的內容準備中，請洽計畫 PM 或管理員。', { size: 20 })); return k.doc(p.title, K.ORG, { top: 760, bottom: 720, left: 950, right: 950 }, body); }
+  body.push(heading('1. 計畫概要', { before: 40 })); body.push(para(s.overview, { after: 40 }));
+  if ((s.stakeholders || []).length) { body.push(heading('2. 委託機關與利害關係人')); body.push(table([3000, W - 3000], [['對象', '角色／關係']].concat(s.stakeholders.map(x => [x.who, x.role])), { header: true, firstColBold: true })); }
+  if ((s.work_items || []).length) { body.push(heading('3. 主要工作項目')); body.push(table([2300, W - 2300], s.work_items.map(x => [x.item, x.summary]), { firstColFill: true, firstColBold: true })); }
+  if ((s.future || []).length) { const a = Math.round(W * 0.58); body.push(heading('4. 未來預計工作（推估，以新年度契約為準）')); body.push(table([a, W - a], [['工作', '推估依據']].concat(s.future.map(x => [x.item, x.basis])), { header: true })); }
+  if ((s.daily_work || []).length) { body.push(heading('5. 新人日常會做的事')); L(s.daily_work).forEach(x => body.push(bullet(x, { size: 18 }))); }
+  if ((s.key_terms || []).length) { body.push(heading('6. 面試前要先懂的名詞')); body.push(table([2100, W - 2100], [['名詞', '說明']].concat(s.key_terms.map(x => [x.term, x.explain])), { header: true, firstColBold: true })); }
+  if ((s.competencies || []).length) { body.push(heading('7. 要評估的能力與問法')); body.push(table([2300, W - 2300], [['能力', '怎麼問出來']].concat(s.competencies.map(x => [x.competency, x.probe])), { header: true, firstColBold: true })); }
+  body.push(heading('8. 聽答案的訊號'));
+  body.push(table([half, half], [['加分訊號（有料）', '警訊（需要追問）'], [L(s.green_flags).map(x => bullet(x, { size: 18 })), L(s.red_flags).map(x => bullet(x, { size: 18 }))]], { header: true }));
+  if ((s.questions || []).length) {
+    body.push(heading('9. 建議題目'));
+    s.questions.forEach((q, i) => {
+      body.push(para([run('Q' + (i + 1) + '. ' + q.question, { bold: true, size: 19, color: K.INK }), run('　' + [q.type, q.level].filter(Boolean).join('｜'), { size: 15, color: K.MUTED })], { before: 70, after: 10, keepNext: true }));
+      L(q.answer_points).forEach(a => body.push(bullet(a, { size: 18, after: 6 })));
+      if (q.rubric) body.push(para([run('評分觀察：', { bold: true, size: 17, color: K.ACCENT }), run(q.rubric, { size: 17 })], { after: 20, indent: { left: 120 } }));
+    });
+  }
+  if ((s.caveats || []).length) { body.push(heading('10. 資料注意事項')); L(s.caveats).forEach(x => body.push(bullet(x, { size: 17 }))); }
+  return k.doc(p.title + '｜面試官資料｜' + c['姓名'], K.ORG + '　面試官資料｜' + (viewer || '') + '｜內部使用',
+    { top: 760, bottom: 720, left: 950, right: 950 }, body);
+}
+
+/** 面試者資料（面試者版＋原 1～5），版面同原「應徵者工作說明」 */
+function buildBriefDoc(D, p, c) {
+  const k = docKit(D), { K, L, run, para, bullet, heading, table } = k;
+  const W = K.A4.width - 2000, half = W / 2;
+  const cd = p.candidate || {};
+  const body = k.titleBlock('應徵者工作說明', p, headInfo('cd', c), W);
+  if (p.empty) { body.push(para('「' + p.name + '」的工作說明準備中。', { size: 20 })); return k.doc(p.title, K.ORG, { top: 800, bottom: 760, left: 1000, right: 1000 }, body); }
+  if (cd.position_hint) body.push(para([run('職務定位　', { bold: true, color: K.ACCENT, size: 20 }), run(cd.position_hint, { size: 20 })], {
+    shading: { type: k.ShadingType.CLEAR, color: 'auto', fill: K.LIGHT }, after: 80, line: 290,
+    border: { left: { style: k.BorderStyle.SINGLE, size: 18, color: K.ACCENT, space: 6 } } }));
+  briefSections(p).forEach((s, i) => {
+    body.push(heading(CN_NUM[i] + '、' + s.t, { before: i === 0 ? 80 : 140 }));
+    if (s.type === 'intro') {
+      body.push(para(s.intro, { size: 20, after: 30, line: 290 }));
+      if (s.why) body.push(para([run('工作的意義：', { bold: true, size: 20 }), run(s.why, { size: 20 })], { after: 40, line: 290 }));
+    } else if (s.type === 'text') body.push(para(s.v, { size: 20, after: 40, line: 290 }));
+    else if (s.type === 'table') {
+      body.push(s.head ? table([3000, W - 3000], [s.head].concat(s.rows), { header: true, firstColBold: true })
+        : table([2300, W - 2300], s.rows, { firstColFill: true, firstColBold: true }));
+    } else if (s.type === 'list') L(s.v).forEach(x => body.push(bullet(x, { size: 19 })));
+    else if (s.type === 'tasks') s.v.forEach((t, n) => {
+      body.push(para([run((n + 1) + '. ' + t.name + '　', { bold: true, color: K.INK, size: 20 }), run(t.description, { size: 20 })], { after: 40, line: 290 }));
+    });
+    else if (s.type === 'two') body.push(table([half, half], [[s.a[0], s.b[0]], [L(s.a[1]).map(x => bullet(x, { size: 18 })), L(s.b[1]).map(x => bullet(x, { size: 18 }))]], { header: true }));
+    else if (s.type === 'qs') s.v.forEach((q, n) => body.push(para([run('Q' + (n + 1) + '　', { bold: true, color: K.ACCENT }), run(q)], { after: 30 })));
+  });
+  body.push(para([run('本說明依本院過往同類計畫整理，實際工作內容以當年度契約及主管安排為準。', { size: 15, color: K.MUTED, italics: true })], { before: 100 }));
+  return k.doc(p.title + '｜應徵者工作說明｜' + c['姓名'], K.ORG + '　應徵者工作說明',
+    { top: 800, bottom: 760, left: 1000, right: 1000 }, body);
+}
+</script>

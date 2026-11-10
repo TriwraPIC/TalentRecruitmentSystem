@@ -1,0 +1,401 @@
+<script>
+/* ===== 兩個頁面共用的前端工具 ===== */
+const App = { me: null, options: {}, version: '0', appUrl: '', candidates: [], staff: [], testMode: false, editing: false, onModalClose: null };
+
+const STAGES = {
+  screening:    { label: '待主管初選', color: 'c-screening' },
+  assign:       { label: '安排面試官', color: 'c-assign' },
+  to_schedule:  { label: '待排面試',   color: 'c-to_schedule' },
+  scheduled:    { label: '已排面試',   color: 'c-scheduled' },
+  await_result: { label: '待面試結果', color: 'c-await_result' },
+  eval:         { label: '待評估',     color: 'c-eval' },
+  offer:        { label: '錄取追蹤',   color: 'c-offer' },
+  thanks:       { label: '待寄感謝函', color: 'c-thanks' },
+  closed:       { label: '已結案',     color: 'c-closed' }
+};
+
+/** 依進度與結果判斷應徵者目前在哪個階段 */
+function stageOf(c) {
+  const p = c['進度'], r = c['結果'], post = c['錄取後進度'];
+  if (r === '不約面試' || r === '應徵者婉拒') return 'closed';
+  if (r === '感謝函') return c['感謝函寄出日'] ? 'closed' : 'thanks';
+  if (r === '錄取') return (post === '已到職' || post === '對方婉拒') ? 'closed' : 'offer';
+  if (r === '評估中') return 'eval';
+  if (p === '已面試') return 'await_result';
+  if (p === '約面試') {
+    if (c['面試日期']) return 'scheduled';
+    return (c['主面試官'] && c['面試計畫']) ? 'to_schedule' : 'assign';
+  }
+  return 'screening';
+}
+
+const RESULT_LABEL = { '錄取': '錄取', '評估中': '待評估', '感謝函': '不錄取' };
+
+function statusText(c) {
+  const r = c['結果'], p = c['進度'], post = c['錄取後進度'];
+  if (r === '錄取') return '錄取' + (post ? '／' + post : '');
+  if (r === '感謝函') {
+    const what = p === '已面試' ? '不錄取' : '初選未通過';
+    return what + (c['感謝函寄出日'] ? '，感謝函已寄出' : '，待寄感謝函');
+  }
+  if (r === '評估中') return '待評估';
+  if (r) return r;
+  if (p === '約面試') {
+    if (c['面試日期']) return '已排面試';
+    if (!c['主面試官']) return '待面試官認領';
+    if (!c['面試計畫']) return '待主面試官選計畫';
+    return '待排時間';
+  }
+  if (p === '已面試') return '已面試';
+  return '待初選';
+}
+
+/** 面試官組合，例如「楊宗政（主）＋莊育寧＋鎧佑」 */
+function panelText(c) {
+  if (!c['主面試官']) return '';
+  const rest = [c['陪同面試官'], c['其他陪同']].filter(Boolean).join('、').split(/[、,，]/).map(x => x.trim()).filter(Boolean);
+  return [c['主面試官'] + '（主）'].concat(rest).join('＋');
+}
+
+/** 我在這場面試的角色：'lead'、'member' 或 '' */
+function myPanelRole(c) {
+  const key = (App.me && App.me.key) || '';
+  const list = String(c['面試官名單'] || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  const i = list.indexOf(key);
+  return i === 0 ? 'lead' : i > 0 ? 'member' : '';
+}
+
+function pill(c) {
+  return '<span class="pill ' + STAGES[stageOf(c)].color + '">' + esc(statusText(c)) + '</span>';
+}
+
+const $ = sel => document.querySelector(sel);
+
+/* ===== 登入憑證 ===== */
+const TOKEN_KEY = 'recruit115_token', EMAIL_KEY = 'recruit115_email';
+function getToken() {
+  if (App._token) return App._token;
+  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+}
+function setToken(t) {
+  App._token = t || '';
+  try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* 無法保存時，本次開啟期間仍可使用 */ }
+}
+function isAuthErr(e) { return errMsg(e).indexOf('AUTH_REQUIRED') >= 0; }
+
+/** 不處理登入狀態的原始呼叫（登入畫面用） */
+function rawCall(fn, args) {
+  return new Promise((resolve, reject) => {
+    google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).rpc(getToken(), fn, args || []);
+  });
+}
+
+/** 一般資料呼叫：登入過期時自動跳出登入畫面 */
+function api(fn, ...args) {
+  return rawCall(fn, args).catch(err => {
+    if (isAuthErr(err)) { setToken(''); showLogin(App._boot); }
+    throw err;
+  });
+}
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g,
+    ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+function errMsg(e) { return (e && e.message ? e.message : String(e)).replace(/^Error:\s*/, ''); }
+
+function toast(msg, isErr) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (isErr ? ' err' : '');
+  el.textContent = msg;
+  $('#toast').appendChild(el);
+  setTimeout(() => el.remove(), isErr ? 6000 : 3000);
+}
+
+function toInputDate(s) { return String(s || '').replace(/\//g, '-'); }
+function shortJob(s) { return String(s || '').replace(/^[A-Z]\d+_/, '').replace(/【[^】]*】/, '').trim(); }
+function hasFlag(c) { return String(c['HR備註'] || '').indexOf('⚠️') >= 0; }
+
+function opts(key, selected, blankLabel) {
+  let h = blankLabel !== undefined ? '<option value="">' + esc(blankLabel) + '</option>' : '';
+  (App.options[key] || []).forEach(v => { h += '<option' + (v === selected ? ' selected' : '') + '>' + esc(v) + '</option>'; });
+  return h;
+}
+
+function formData(form) {
+  const o = {};
+  new FormData(form).forEach((v, k) => { o[k] = typeof v === 'string' ? v.trim() : v; });
+  return o;
+}
+
+/** 按鈕執行中顯示「處理中…」；失敗時跳出錯誤訊息並回傳 undefined */
+async function withBusy(btn, fn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '處理中…';
+  try { return await fn(); }
+  catch (e) { toast(errMsg(e), true); return undefined; }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+
+/* ===== 對話框 ===== */
+function openModal(html, cls) {
+  const card = $('#modalCard');
+  card.className = 'modal-card ' + (cls || '');
+  card.innerHTML = html;
+  $('#modal').hidden = false;
+  const first = card.querySelector('input, select, textarea, button');
+  if (first) first.focus();
+}
+function closeModal() {
+  $('#modal').hidden = true;
+  $('#modalCard').innerHTML = '';
+  const f = App.onModalClose; App.onModalClose = null;
+  if (f) f();
+}
+function confirmDialog(o) {
+  return new Promise(resolve => {
+    openModal('<h2>' + esc(o.title) + '</h2>' + (o.message ? '<p>' + esc(o.message) + '</p>' : '') +
+      (o.input ? '<div class="form"><label class="full">' + esc(o.input.label) +
+        '<textarea id="cfInput" placeholder="' + esc(o.input.placeholder || '') + '"></textarea></label></div>' : '') +
+      '<div class="row-btns"><button class="btn" id="cfNo">取消</button>' +
+      '<button class="btn ' + (o.danger ? 'danger' : 'primary') + '" id="cfOk">' + esc(o.okText || '確定') + '</button></div>', 'narrow');
+    let done = false;
+    App.onModalClose = () => { if (!done) { done = true; resolve({ ok: false }); } };
+    $('#cfNo').onclick = () => closeModal();
+    $('#cfOk').onclick = () => {
+      const value = o.input ? $('#cfInput').value.trim() : '';
+      done = true; App.onModalClose = null; closeModal();
+      resolve({ ok: true, value: value });
+    };
+  });
+}
+
+/* ===== 履歷檢視：檔案內容由後端傳來，不需開放雲端硬碟權限 ===== */
+async function openResume(id, name) {
+  const title = '<h2>' + esc(name) + ' 的履歷</h2>';
+  openModal(title + '<div class="loading">讀取中…</div>', 'wide');
+  try {
+    const f = await api('getResumeFile', id);
+    const bytes = Uint8Array.from(atob(f.base64), ch => ch.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: f.mimeType }));
+    const isPdf = /pdf/i.test(f.mimeType), isImg = /^image\//.test(f.mimeType);
+    $('#modalCard').innerHTML = title +
+      (isPdf ? '<div class="pdf-pages" id="pdfPages"><div class="loading">正在載入履歷…</div></div>'
+        : isImg ? '<img src="' + url + '" alt="履歷" style="max-width:100%">'
+        : '<p>這種檔案無法在頁面上預覽，請下載後開啟。</p>') +
+      '<div class="row-btns"><a class="btn left" href="' + url + '" download="' + esc(f.name) + '">下載</a>' +
+      '<a class="btn" href="' + url + '" target="_blank" rel="noopener">在新分頁開啟</a>' +
+      '<button class="btn primary" id="rvClose">關閉</button></div>';
+    $('#rvClose').onclick = closeModal;
+    App.onModalClose = () => setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if (isPdf) {
+      renderPdf(bytes.slice(), $('#pdfPages')).catch(() => {
+        const box = $('#pdfPages');
+        if (box) box.innerHTML = '<div class="empty">無法在頁面上預覽這份 PDF，請按「下載」或「在新分頁開啟」。</div>';
+      });
+    }
+  } catch (e) {
+    $('#modalCard').innerHTML = title + '<p>' + esc(errMsg(e)) + '</p><div class="row-btns"><button class="btn primary" onclick="closeModal()">關閉</button></div>';
+  }
+}
+
+/* PDF.js：瀏覽器內建的 PDF 檢視器在 Apps Script 網頁裡會被擋，改成逐頁畫在畫面上 */
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+let pdfjsLoading = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!pdfjsLoading) {
+    pdfjsLoading = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDFJS_CDN + 'pdf.min.js';
+      s.onload = () => {
+        const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+        if (!lib) { pdfjsLoading = null; reject(new Error('PDF 元件載入失敗')); return; }
+        lib.GlobalWorkerOptions.workerSrc = PDFJS_CDN + 'pdf.worker.min.js';
+        resolve(lib);
+      };
+      s.onerror = () => { pdfjsLoading = null; reject(new Error('PDF 元件載入失敗')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfjsLoading;
+}
+
+async function renderPdf(bytes, box) {
+  const lib = await loadPdfJs();
+  const pdf = await lib.getDocument({ data: bytes, cMapUrl: PDFJS_CDN + 'cmaps/', cMapPacked: true }).promise;
+  box.innerHTML = '';
+  const width = Math.max(box.clientWidth - 20, 300);
+  const ratio = window.devicePixelRatio || 1;
+  for (let i = 1; i <= pdf.numPages; i++) {
+    if (!box.isConnected) return; // 視窗已關閉
+    const page = await pdf.getPage(i);
+    const scale = width / page.getViewport({ scale: 1 }).width;
+    const vp = page.getViewport({ scale: scale * ratio });
+    const canvas = document.createElement('canvas');
+    canvas.className = 'pdf-page';
+    canvas.width = Math.floor(vp.width);
+    canvas.height = Math.floor(vp.height);
+    canvas.setAttribute('aria-label', '履歷第 ' + i + ' 頁');
+    box.appendChild(canvas);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  }
+}
+
+/* ===== 詳細資料區塊 ===== */
+const INFO_FIELDS = ['性別', '年齡', '手機', 'Email', '現居', '最高學歷', '最高學歷學校科系', '次高學歷學校科系',
+  '應徵職缺', '應徵管道', '標案經驗', '報告經驗', '工作經歷', '其他專長'];
+
+function infoHtml(c) {
+  const rows = INFO_FIELDS.filter(f => c[f] !== '' && c[f] !== null && c[f] !== undefined)
+    .map(f => '<dt>' + esc(f) + '</dt><dd>' + esc(c[f]) + '</dd>');
+  return rows.length ? '<dl class="info">' + rows.join('') + '</dl>' : '<p class="sub">尚未填寫基本資料。</p>';
+}
+
+function reviewsHtml(reviews) {
+  if (!reviews.length) return '<p class="sub">還沒有面試評語。</p>';
+  return reviews.map(r => {
+    const bits = ['現場表現', '建議團隊', '辦公地點'].filter(k => r[k]).map(k => esc(k) + '：' + esc(r[k])).join('　');
+    return '<div class="review"><div><span class="who">' + esc(r['面試官']) + '</span>' +
+      (r['建議結果'] ? '　' + esc(r['建議結果']) : '') + '<span class="sub">' + esc(r['填寫時間']) + '</span></div>' +
+      (bits ? '<div>' + bits + '</div>' : '') +
+      (r['備註'] ? '<div class="pre sub">' + esc(String(r['備註']).replace(/；/g, '\n')) + '</div>' : '') + '</div>';
+  }).join('');
+}
+
+function historyHtml(h) {
+  if (!h.length) return '<p class="sub">沒有紀錄。</p>';
+  return '<ul class="hist">' + h.map(x => '<li>' + esc(x['時間']) + '　' + esc(x['操作者']) + '　' + esc(x['欄位']) +
+    '：' + (x['舊值'] ? esc(x['舊值']) + ' → ' : '') + esc(x['新值']) + '</li>').join('') + '</ul>';
+}
+
+/* ===== 同步 ===== */
+function setSync(isErr) {
+  const el = $('#sync'); if (!el) return;
+  const d = new Date();
+  el.textContent = isErr ? '連線中斷，稍後自動重試'
+    : '更新於 ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+/** 每 30 秒問一次版本號，有變才重新抓資料；切回分頁時立刻檢查 */
+function startPolling(onChange) {
+  if (App._polling) return;
+  App._polling = true;
+  const tick = async () => {
+    if (document.hidden) return;
+    try {
+      const v = await api('getVersion');
+      if (v !== App.version) { App.version = v; await onChange(); }
+      setSync(false);
+    } catch (e) { if (!isAuthErr(e)) setSync(true); }
+  };
+  setInterval(tick, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+}
+
+/**
+ * 啟動頁面：沒有登入就先顯示登入畫面
+ * pageKind：'hr'、'manager'，或 null（首頁）
+ */
+async function bootApp(init, pageKind) {
+  App._boot = () => bootApp(init, pageKind);
+  if (!getToken()) { showLogin(App._boot); return; }
+  let b;
+  try { b = await api('getBootstrap'); }
+  catch (e) {
+    if (!isAuthErr(e)) document.body.innerHTML = '<div class="empty">' + esc(errMsg(e)) + '</div>';
+    return;
+  }
+  App.me = b.me; App.options = b.options; App.version = b.version; App.appUrl = b.appUrl || '';
+  App.staff = b.staff || []; App.testMode = !!b.testMode;
+  if (App.testMode && !document.getElementById('testBanner')) {
+    const t = document.createElement('div');
+    t.id = 'testBanner'; t.className = 'test-banner';
+    t.textContent = '測試模式：系統通知信目前都只寄給管理員，不會寄給 HR、所長或面試官。';
+    document.body.insertBefore(t, document.body.firstChild);
+  }
+
+  const allowed = { hr: ['HR', '管理員'], manager: ['所長', '面試官', '管理員'] }[pageKind];
+  if (allowed && allowed.indexOf(App.me.role) < 0) {
+    const right = App.me.role === 'HR' ? 'hr' : 'manager';
+    document.body.innerHTML = '<div class="login-overlay"><div class="login-card"><div class="login-brand">115 二所人力招募系統</div>' +
+      '<p>' + esc(App.me.name) + '（' + esc(App.me.role) + '）沒有使用這個頁面的權限。</p>' +
+      '<div class="row-btns"><a class="btn primary" href="' + esc(App.appUrl + '?page=' + right) + '">前往我的工作台</a></div></div></div>';
+    return;
+  }
+  addLogoutButton();
+  try { await init(); }
+  catch (e) { if (!isAuthErr(e)) toast(errMsg(e), true); }
+}
+
+function addLogoutButton() {
+  const bar = document.querySelector('.top-actions');
+  if (!bar || $('#btnLogout')) return;
+  const b = document.createElement('button');
+  b.id = 'btnLogout'; b.className = 'btn ghost'; b.textContent = '登出';
+  b.onclick = async () => {
+    try { await rawCall('logout', [getToken()]); } catch (e) { /* 伺服器登出失敗，仍清除本機憑證 */ }
+    setToken('');
+    showLogin(App._boot);
+  };
+  bar.appendChild(b);
+}
+
+/* ===== 登入畫面（Email 驗證碼） ===== */
+function showLogin(onDone) {
+  if ($('#loginOverlay')) return;
+  const ov = document.createElement('div');
+  ov.id = 'loginOverlay'; ov.className = 'login-overlay';
+  ov.innerHTML = '<div class="login-card" role="dialog" aria-modal="true" aria-labelledby="lgTitle">' +
+    '<div class="login-brand">115 二所人力招募系統</div><h2 id="lgTitle">登入</h2>' +
+    '<p class="sub">輸入單位信箱，系統會寄一組 6 位數驗證碼給你。</p>' +
+    '<div class="form"><label class="full">單位 Email<input type="email" id="lgEmail" autocomplete="email" placeholder="name@triwra.org.tw"></label>' +
+    '<label class="full" id="lgCodeWrap" hidden>驗證碼<input id="lgCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6 位數字"></label></div>' +
+    '<div id="lgMsg" class="sub" style="margin-top:10px"></div>' +
+    '<div class="row-btns"><button type="button" class="btn" id="lgBack" hidden>重新輸入 Email</button>' +
+    '<button type="button" class="btn primary" id="lgBtn">寄送驗證碼</button></div></div>';
+  document.body.appendChild(ov);
+
+  let stage = 'email', email = '';
+  const btn = $('#lgBtn'), msg = $('#lgMsg'), emailEl = $('#lgEmail'), codeEl = $('#lgCode');
+  try { emailEl.value = localStorage.getItem(EMAIL_KEY) || ''; } catch (e) { /* 忽略 */ }
+  emailEl.focus();
+
+  const toEmailStage = () => {
+    stage = 'email'; emailEl.disabled = false; $('#lgCodeWrap').hidden = true; $('#lgBack').hidden = true;
+    btn.textContent = '寄送驗證碼'; msg.textContent = ''; emailEl.focus();
+  };
+  $('#lgBack').onclick = toEmailStage;
+
+  btn.onclick = async () => {
+    msg.textContent = '';
+    if (stage === 'email') {
+      email = emailEl.value.trim();
+      if (!email) { msg.textContent = '請輸入 Email。'; return; }
+      const r = await withBusy(btn, () => rawCall('requestLoginCode', [email]));
+      if (!r) return;
+      try { localStorage.setItem(EMAIL_KEY, email); } catch (e) { /* 忽略 */ }
+      stage = 'code'; emailEl.disabled = true; $('#lgCodeWrap').hidden = false; $('#lgBack').hidden = false;
+      btn.textContent = '登入';
+      msg.textContent = '驗證碼已寄到 ' + r.masked + '，10 分鐘內有效。沒收到的話，請看一下垃圾郵件匣。';
+      codeEl.value = ''; codeEl.focus();
+    } else {
+      const code = codeEl.value.trim();
+      if (!/^\d{6}$/.test(code)) { msg.textContent = '請輸入信中的 6 位數字。'; return; }
+      const r = await withBusy(btn, () => rawCall('verifyLoginCode', [email, code]));
+      if (!r) return;
+      setToken(r.token);
+      ov.remove();
+      if (onDone) onDone();
+    }
+  };
+  ov.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } });
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || $('#loginOverlay')) return;
+  if ($('#modal') && !$('#modal').hidden) closeModal();
+  else if (typeof closeDrawer === 'function') closeDrawer();
+});
+if ($('#modal')) $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+</script>
